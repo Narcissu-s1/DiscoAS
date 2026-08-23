@@ -5,37 +5,36 @@ QQ音乐 API 模块 - 使用签名算法
 支持本地缓存回退
 """
 
-import json
 import os
 import sys
 
 import requests
+
+from platforms.provider_common import CollectionProvider, response_json
 
 # 添加 settings 目录到路径，导入统一的路径管理模块
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings'))
 from settings.user_data_path import ensure_dir, get_album_dir, get_playlist_dir
 
 
-class PlaylistAlbumJson:
+class PlaylistAlbumJson(CollectionProvider):
     """QQ音乐歌单/专辑JSON获取类"""
 
+    platform_name = "QQMusic"
+
     def __init__(self, playlist_album_id: str, typename: str):
-        self.playlist_album_id = playlist_album_id
-        self.typename = typename
+        super().__init__(playlist_album_id, typename)
         self.playlist_album_name: str = ""
         self.playlist_album_json: dict | list = {}
         self.cover_url: str = ""
         self.album_mid: str = ""  # 用于专辑封面 URL 构造
 
-        # 尝试从API获取，失败则从本地缓存读取
-        try:
-            self._fetch_data()
-        except Exception as e:
-            print(f"API获取失败，尝试从本地缓存读取: {e}")
-            self._load_from_cache()
-
     def _fetch_data(self) -> None:
         """获取歌单/专辑数据"""
+        self.playlist_album_name = ""
+        self.playlist_album_json = {}
+        self.cover_url = ""
+        self.album_mid = ""
 
         if self.typename == "playlist":
             # 获取歌单详情 - 使用 qzone-music API（需要 type=1 和 newcp=1 参数）
@@ -63,7 +62,7 @@ class PlaylistAlbumJson:
             }
 
             response = requests.get(url, params=params, headers=headers, timeout=10)
-            data = response.json()
+            data = response_json(response)
 
             # 解析响应
             cdlist = data.get("cdlist", [])
@@ -104,7 +103,7 @@ class PlaylistAlbumJson:
             }
 
             response = requests.get(url, params=params, headers=headers, timeout=10)
-            data = response.json()
+            data = response_json(response)
 
             # 解析响应
             album_data = data.get("data", {})
@@ -116,8 +115,9 @@ class PlaylistAlbumJson:
                 # 保存第一首歌的 album.mid 用于构造专辑封面 URL
                 if songlist:
                     first_song = songlist[0]
+                    self.album_mid = first_song.get("album", {}).get("mid", "")
                     first_song_id = first_song.get("songid") or first_song.get("id")
-                    if first_song_id:
+                    if not self.album_mid and first_song_id:
                         self.album_mid = self._fetch_first_song_album_mid(first_song_id)
             else:
                 raise ValueError(f"无法获取专辑信息，API返回: {data}")
@@ -126,25 +126,20 @@ class PlaylistAlbumJson:
 
         print(f"已获取{self.typename}: {self.playlist_album_name}")
 
-    def _load_from_cache(self) -> None:
+    def _load_from_cache(self) -> bool:
         """从本地缓存加载数据"""
-        # 使用统一的路径管理
-        if self.typename == "playlist":
-            cache_path = os.path.join(get_playlist_dir("QQMusic"), f"{self.playlist_album_id}.json")
-        else:
-            cache_path = os.path.join(get_album_dir("QQMusic"), f"{self.playlist_album_id}.json")
+        cache_data = self._read_cache()
+        if not cache_data:
+            return False
 
-        if os.path.exists(cache_path):
-            with open(cache_path, encoding="utf-8") as f:
-                cache_data = json.load(f)
-                self.playlist_album_name = cache_data.get("playlist_album_name", "")
-                self.playlist_album_json = {"songlist": []}
-                # 从缓存恢复歌曲ID列表
-                for song_id in cache_data.get("song_ids", []):
-                    self.playlist_album_json["songlist"].append({"id": song_id})
-            print(f"已从缓存加载{self.typename}: {self.playlist_album_name}")
-        else:
-            raise FileNotFoundError(f"本地缓存不存在: {cache_path}")
+        self.playlist_album_name = cache_data.get("playlist_album_name", "")
+        self.cover_url = cache_data.get("coverUrl", "")
+        self.album_mid = cache_data.get("album_mid", "")
+        self.playlist_album_json = {
+            "songlist": [{"id": song_id} for song_id in cache_data.get("song_ids", [])]
+        }
+        print(f"已从缓存加载{self.typename}: {self.playlist_album_name}")
+        return True
 
     def get_id(self) -> str:
         return self.playlist_album_id
@@ -166,14 +161,13 @@ class PlaylistAlbumJson:
                     elif "id" in song:
                         songs.append(song["id"])
 
-        elif self.typename == "album":
+        elif self.typename == "album" and "songlist" in self.playlist_album_json:
             # 从专辑中提取歌曲ID
-            if "songlist" in self.playlist_album_json:
-                for song in self.playlist_album_json["songlist"]:
-                    if "songid" in song:
-                        songs.append(song["songid"])
-                    elif "id" in song:
-                        songs.append(song["id"])
+            for song in self.playlist_album_json["songlist"]:
+                if "songid" in song:
+                    songs.append(song["songid"])
+                elif "id" in song:
+                    songs.append(song["id"])
 
         return songs
 
@@ -189,7 +183,13 @@ class PlaylistAlbumJson:
                 "client": 1,
             }
             api_result = qs.make_api_request("music.trackInfo.UniformRuleCtrl", "CgiGetTrackInfo", params)
-            tracks = api_result.get("music.trackInfo.UniformRuleCtrl", {}).get("data", {}).get("tracks", [])
+            tracks = api_result.get("tracks", [])
+            if not tracks:
+                tracks = (
+                    api_result.get("music.trackInfo.UniformRuleCtrl", {})
+                    .get("data", {})
+                    .get("tracks", [])
+                )
             if tracks:
                 album = tracks[0].get("album", {})
                 return album.get("mid", "")
@@ -215,13 +215,12 @@ class PlaylistAlbumJson:
             "playlist_album_name": self.playlist_album_name,
             "playlist_album_type": self.typename,
             "song_ids": song_ids,
-            "coverUrl": cover_url
+            "coverUrl": cover_url,
+            "album_mid": self.album_mid,
         }
 
-        filepath = os.path.join(path, f"{self.playlist_album_id}.json")
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-            print(f"已保存{self.typename} {self.playlist_album_id} {self.playlist_album_name} 到 {path}")
+        self._write_cache(data)
+        print(f"已保存{self.typename} {self.playlist_album_id} {self.playlist_album_name} 到 {path}")
 
 
 if __name__ == '__main__':
@@ -234,7 +233,8 @@ if __name__ == '__main__':
         playlist_id = "9595891286"
         typename = "playlist"
 
-    playlist = PlaylistAlbumJson(playlist_id, typename)
+    playlist = PlaylistAlbumJson(playlist_id, typename).refresh()
     print(f"名称: {playlist.get_name()}")
     print(f"歌曲数量: {len(playlist.get_songs())}")
-    playlist.save()
+    if not playlist.is_stale:
+        playlist.save()

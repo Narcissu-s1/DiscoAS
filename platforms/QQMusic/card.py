@@ -145,8 +145,10 @@ class SongCard:
 
     def get_scheme_url(self) -> str:
         """生成QQ音乐scheme URL用于唤起播放"""
-        url = f"tencent://QQMusic/?version==1173&&cmd_count==1&&cmd_0==playsong&&id_0=={self.song_id}&&songtype_0==0"
-        return url
+        return (
+            "tencent://QQMusic/?version==1173&&cmd_count==1"
+            f"&&cmd_0==playsong&&id_0=={self.song_id}&&songtype_0==0"
+        )
 
     def get_debug_info(self) -> str:
         """返回歌曲真实信息，用于后台调试输出"""

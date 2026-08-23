@@ -3,10 +3,13 @@ import os
 import sys
 import traceback
 
+from Discover import DiscoverASong
+from platforms.KugouMusic.run import play_song as kugou_play_song
 from platforms.NeteaseCloudMusic.run import play_song as netease_play_song
 from platforms.QQMusic.run import play_song as qqmusic_play_song
-from platforms.KugouMusic.run import play_song as kugou_play_song
 from platforms.Spotify.run import play_song as spotify_play_song
+from settings.gui_setting import GuiSetting
+from settings.music_setting import PASetting
 
 PLATFORM_RUN_MAP = {
     'NeteaseCloudMusic': netease_play_song,
@@ -35,18 +38,11 @@ def _is_process_alive(pid: int) -> bool:
 
 sys.path.append(os.path.dirname(__file__))
 
-# 导入日志模块（必须在其他模块之前初始化）
-# 这会自动全局替换 print 函数，使所有模块的 print 都写入日志
-
-from Discover import DiscoverASong
-from settings.gui_setting import GuiSetting
-from settings.music_setting import PASetting
-
 # GUI导入
 try:
     from PyQt6.QtCore import QByteArray, QEasingCurve, QEventLoop, QPropertyAnimation, Qt, QTimer
-    from PyQt6.QtGui import QAction, QIcon, QPixmap
-    from PyQt6.QtWidgets import QApplication, QLabel, QMenu, QSystemTrayIcon, QWidget
+    from PyQt6.QtGui import QPixmap
+    from PyQt6.QtWidgets import QApplication, QLabel, QWidget
     GUI_AVAILABLE = True
 except ImportError:
     GUI_AVAILABLE = False
@@ -257,8 +253,11 @@ class DiscoverApp:
             playlist_json = PlaylistAlbumJson(
                 enabled_playlist.playlist_album_id,
                 enabled_playlist.typename
-            )
-            playlist_json.save()
+            ).refresh()
+            if playlist_json.is_stale:
+                print(f"远端更新失败，已使用本地缓存: {playlist_json.last_refresh_error}")
+            else:
+                playlist_json.save()
             print(f"歌单更新完成: {playlist_json.get_name()}")
         except Exception as e:
             print(f"更新歌单失败: {e}")
@@ -276,7 +275,7 @@ class DiscoverApp:
                         _("playlist_load_failed"),
                         _("playlist_load_failed_msg").format(error=str(e))
                     )
-            except:
+            except Exception:
                 pass
 
     def _apply_settings(self) -> None:

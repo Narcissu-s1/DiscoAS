@@ -779,7 +779,7 @@ class DiscoverOverlay(QMainWindow):
                             _("playlist_file_not_found"),
                             _("playlist_file_not_found_msg")
                         )
-                except:
+                except Exception:
                     pass
             self.songs_loaded.emit([])
 
@@ -1460,16 +1460,13 @@ def run_gui():
         with contextlib.suppress(BaseException):
             i18n.set_language(discover_app.gui_setting.language)
 
-        # 程序启动时立即开始预加载（歌曲详情 + 封面图片 + 存入缓存）
-        preload_next_batch(discover_app)
-
         # 创建托盘
         create_tray_icon(app, discover_app)
 
         # 注册全局快捷键
         try:
             register_global_shortcut(app, discover_app, discover_app.music_setting.shortcut_key)
-        except:
+        except Exception:
             register_global_shortcut(app, discover_app, "Alt+D")
 
     # 使用 QTimer.singleShot(0, ...) 让后台加载在事件循环开始后执行

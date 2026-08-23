@@ -34,6 +34,7 @@
 - 网易云音乐
 - QQ音乐
 - 酷狗音乐
+- Spotify
 
 由于是通过scheme url唤起本地应用（用过苹果的快捷指令的话，应该对这些词不陌生吧´-ω-)b），所以还请先安装你所使用的音乐平台对应的桌面软件捏。
 
@@ -55,18 +56,23 @@ https://music.163.com/playlist?id={网易云音乐歌单id}
 # 待浏览器跳转后，网址栏会显示如下链接
 https://y.qq.com/n/ryqq_v2/playlist/{QQ音乐歌单id}?{问号后的参数不用理会}
 
-# 酷狗音乐歌单的id正常情况下不显示在链接中，链接中的为暂时的“分享码”
-# 本程序支持通过分享码读取歌单
-# 但在加载歌单后，歌曲名字栏会显示一串数字id，那串数字id是歌单真正的id，之后歌单更新将通过该id进行
-# 才不是因为我没从接口返回的json里找到歌单名字呢（
-https://t4.kugou.com/song.html?id={酷狗音乐歌单分享码}
-
-# ==== 以下平台暂未实装 ====
+# 酷狗音乐支持直接填写完整分享链接或其中的短码
+# 兼容旧版 special 歌单和新版 share_type=collect 收藏集合
+https://t1.kugou.com/{酷狗音乐分享短码}
 
 # Spotify歌单id可以通过「分享」的方式获得
 https://open.spotify.com/playlist/{Spotify歌单id}?si={不用管}
 
 ```
+
+Spotify 未配置访问令牌时会使用 Embed 页面数据，这类数据可能只包含前 50 首，程序会将其标记为不完整。若要通过官方 Web API 完整分页，请先在 PowerShell 中设置访问令牌后再启动：
+
+```powershell
+$env:SPOTIFY_ACCESS_TOKEN="你的 Spotify OAuth 访问令牌"
+.\start.cmd
+```
+
+Spotify 开发模式下，官方 API 只能读取当前账号拥有或参与协作的歌单；令牌过期后需要重新获取。
 
 ---
 

@@ -1,7 +1,10 @@
+import contextlib
 import datetime
 import os
 import sys
 
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -64,10 +67,6 @@ except ImportError:
     # 如果导入失败，创建一个简单的翻译函数
     def _(key):
         return key
-import contextlib
-
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 
 # 导入你修改后的类
 try:
@@ -342,7 +341,6 @@ class SettingsWindow(QMainWindow):
         # 获取可用语言
         try:
             from settings.i18n import LANGUAGES, get_language
-            from settings.i18n import set_language as i18n_set_language
             for code, name in LANGUAGES.items():
                 self.combo_language.addItem(name, code)
 
@@ -777,74 +775,77 @@ class SettingsWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         """事件过滤器，用于捕获快捷键输入"""
-        if obj == self.edit_shortcut and getattr(self, '_recording_shortcut', False):
-            if event.type() == QEvent.Type.KeyPress:
-                key = event.key()
+        if (
+            obj == self.edit_shortcut
+            and getattr(self, '_recording_shortcut', False)
+            and event.type() == QEvent.Type.KeyPress
+        ):
+            key = event.key()
 
-                # 按 ESC 取消录制
-                if key == Qt.Key.Key_Escape:
-                    self.stop_shortcut_recording()
-                    self.edit_shortcut.setText(self.pa_setting.shortcut_key)
-                    return True
+            # 按 ESC 取消录制
+            if key == Qt.Key.Key_Escape:
+                self.stop_shortcut_recording()
+                self.edit_shortcut.setText(self.pa_setting.shortcut_key)
+                return True
 
-                # 构建快捷键字符串
-                modifiers = []
-                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                    modifiers.append("Ctrl")
-                if event.modifiers() & Qt.KeyboardModifier.AltModifier:
-                    modifiers.append("Alt")
-                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                    modifiers.append("Shift")
+            # 构建快捷键字符串
+            modifiers = []
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                modifiers.append("Ctrl")
+            if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+                modifiers.append("Alt")
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                modifiers.append("Shift")
 
-                # 获取按键名称
-                Qt.Key(key)
-                key_text = ""
+            # 获取按键名称
+            Qt.Key(key)
+            key_text = ""
 
-                # 功能键
-                if key in (Qt.Key.Key_F1, Qt.Key.Key_F2, Qt.Key.Key_F3, Qt.Key.Key_F4,
-                           Qt.Key.Key_F5, Qt.Key.Key_F6, Qt.Key.Key_F7, Qt.Key.Key_F8,
-                           Qt.Key.Key_F9, Qt.Key.Key_F10, Qt.Key.Key_F11, Qt.Key.Key_F12):
-                    key_text = f"F{key - Qt.Key.Key_F1 + 1}"
-                # 特殊键
-                elif key == Qt.Key.Key_Space:
-                    key_text = "Space"
-                elif key == Qt.Key.Key_Tab:
-                    key_text = "Tab"
-                elif key == Qt.Key.Key_Backspace:
-                    key_text = "Backspace"
-                elif key == Qt.Key.Key_Return:
-                    key_text = "Return"
-                elif key == Qt.Key.Key_Enter:
-                    key_text = "Enter"
-                elif key == Qt.Key.Key_Delete:
-                    key_text = "Delete"
-                elif key == Qt.Key.Key_Insert:
-                    key_text = "Insert"
-                elif key == Qt.Key.Key_Home:
-                    key_text = "Home"
-                elif key == Qt.Key.Key_End:
-                    key_text = "End"
-                elif key == Qt.Key.Key_PageUp:
-                    key_text = "PageUp"
-                elif key == Qt.Key.Key_PageDown:
-                    key_text = "PageDown"
-                elif key == Qt.Key.Key_Up:
-                    key_text = "Up"
-                elif key == Qt.Key.Key_Down:
-                    key_text = "Down"
-                elif key == Qt.Key.Key_Left:
-                    key_text = "Left"
-                elif key == Qt.Key.Key_Right:
-                    key_text = "Right"
-                # 单个字符键
-                elif key >= Qt.Key.Key_A and key <= Qt.Key.Key_Z or key >= Qt.Key.Key_0 and key <= Qt.Key.Key_9:
-                    key_text = chr(key)
+            # 功能键
+            if key in (Qt.Key.Key_F1, Qt.Key.Key_F2, Qt.Key.Key_F3, Qt.Key.Key_F4,
+                       Qt.Key.Key_F5, Qt.Key.Key_F6, Qt.Key.Key_F7, Qt.Key.Key_F8,
+                       Qt.Key.Key_F9, Qt.Key.Key_F10, Qt.Key.Key_F11, Qt.Key.Key_F12):
+                key_text = f"F{key - Qt.Key.Key_F1 + 1}"
+            # 特殊键
+            elif key == Qt.Key.Key_Space:
+                key_text = "Space"
+            elif key == Qt.Key.Key_Tab:
+                key_text = "Tab"
+            elif key == Qt.Key.Key_Backspace:
+                key_text = "Backspace"
+            elif key == Qt.Key.Key_Return:
+                key_text = "Return"
+            elif key == Qt.Key.Key_Enter:
+                key_text = "Enter"
+            elif key == Qt.Key.Key_Delete:
+                key_text = "Delete"
+            elif key == Qt.Key.Key_Insert:
+                key_text = "Insert"
+            elif key == Qt.Key.Key_Home:
+                key_text = "Home"
+            elif key == Qt.Key.Key_End:
+                key_text = "End"
+            elif key == Qt.Key.Key_PageUp:
+                key_text = "PageUp"
+            elif key == Qt.Key.Key_PageDown:
+                key_text = "PageDown"
+            elif key == Qt.Key.Key_Up:
+                key_text = "Up"
+            elif key == Qt.Key.Key_Down:
+                key_text = "Down"
+            elif key == Qt.Key.Key_Left:
+                key_text = "Left"
+            elif key == Qt.Key.Key_Right:
+                key_text = "Right"
+            # 单个字符键
+            elif key >= Qt.Key.Key_A and key <= Qt.Key.Key_Z or key >= Qt.Key.Key_0 and key <= Qt.Key.Key_9:
+                key_text = chr(key)
 
-                if key_text:
-                    shortcut_str = "+".join(modifiers + [key_text])
-                    self.edit_shortcut.setText(shortcut_str)
-                    self.stop_shortcut_recording()
-                    return True
+            if key_text:
+                shortcut_str = "+".join(modifiers + [key_text])
+                self.edit_shortcut.setText(shortcut_str)
+                self.stop_shortcut_recording()
+                return True
 
         return super().eventFilter(obj, event)
 
@@ -926,7 +927,8 @@ class SettingsWindow(QMainWindow):
 
         # 2. ID
         edit_id = QLineEdit()
-        if data: edit_id.setText(str(data.playlist_album_id))
+        if data:
+            edit_id.setText(str(data.playlist_album_id))
         self.table_pl.setCellWidget(row, 1, edit_id)
 
         # 3. Type
@@ -1008,12 +1010,16 @@ class SettingsWindow(QMainWindow):
             if not PlaylistAlbumJson:
                 raise ValueError(f"不支持的平台: {platform}")
 
-            playlist_album = PlaylistAlbumJson(playlist_id, typename)
-            playlist_album.save()
+            playlist_album = PlaylistAlbumJson(playlist_id, typename).refresh()
+            if not playlist_album.is_stale:
+                playlist_album.save()
+
+            normalized_id = playlist_album.get_id()
+            if normalized_id != playlist_id:
+                self.table_pl.cellWidget(row, 1).setText(normalized_id)
 
             remark_widget = self.table_pl.cellWidget(row, 3)
-            if remark_widget.text() == "":
-                remark_widget.setText(playlist_album.get_name())
+            remark_widget.setText(playlist_album.get_name())
 
             QMessageBox.information(self, _("load_success"), _("loaded_successfully").format(name=playlist_album.get_name()))
         except Exception as e:

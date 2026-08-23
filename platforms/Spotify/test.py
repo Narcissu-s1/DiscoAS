@@ -1,7 +1,9 @@
-import requests
-import re
 import json
 import os
+import re
+
+import requests
+
 
 class SpotifyEmbedScraper:
     def __init__(self):
@@ -24,7 +26,7 @@ class SpotifyEmbedScraper:
         match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', res.text)
         if not match:
             raise RuntimeError(f"无法在页面源码中找到 __NEXT_DATA__ 节点，Spotify 可能更改了网页结构。\n请求的URL: {url}")
-            
+
         try:
             return json.loads(match.group(1))
         except json.JSONDecodeError:

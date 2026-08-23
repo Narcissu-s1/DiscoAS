@@ -3,7 +3,6 @@ tests/test_platform_get_json.py
 测试各平台 get_json 模块的 JSON 解析逻辑（使用 mock 避免真实 HTTP 请求）
 """
 
-import json
 import os
 import sys
 import unittest
@@ -31,7 +30,7 @@ class TestNeteaseCloudMusicPlaylist(unittest.TestCase):
 
         from platforms.NeteaseCloudMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("999", "playlist")
+        obj = PlaylistAlbumJson("999", "playlist").refresh()
         self.assertEqual(obj.get_name(), "测试歌单")
 
     @patch("platforms.NeteaseCloudMusic.get_json.get_session")
@@ -44,7 +43,7 @@ class TestNeteaseCloudMusicPlaylist(unittest.TestCase):
 
         from platforms.NeteaseCloudMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("999", "playlist")
+        obj = PlaylistAlbumJson("999", "playlist").refresh()
         self.assertEqual(obj.get_songs(), [123, 456])
 
     @patch("platforms.NeteaseCloudMusic.get_json.get_session")
@@ -57,7 +56,7 @@ class TestNeteaseCloudMusicPlaylist(unittest.TestCase):
 
         from platforms.NeteaseCloudMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("888", "playlist")
+        obj = PlaylistAlbumJson("888", "playlist").refresh()
         self.assertEqual(obj.get_id(), "888")
 
     @patch("platforms.NeteaseCloudMusic.get_json.get_session")
@@ -84,7 +83,7 @@ class TestNeteaseCloudMusicAlbum(unittest.TestCase):
 
         from platforms.NeteaseCloudMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("555", "album")
+        obj = PlaylistAlbumJson("555", "album").refresh()
         self.assertEqual(obj.get_name(), "测试专辑")
 
     @patch("platforms.NeteaseCloudMusic.get_json.get_session")
@@ -97,7 +96,7 @@ class TestNeteaseCloudMusicAlbum(unittest.TestCase):
 
         from platforms.NeteaseCloudMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("555", "album")
+        obj = PlaylistAlbumJson("555", "album").refresh()
         self.assertEqual(obj.get_songs(), [789, 100])
 
 
@@ -117,7 +116,7 @@ class TestQQMusicPlaylist(unittest.TestCase):
 
         from platforms.QQMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("333", "playlist")
+        obj = PlaylistAlbumJson("333", "playlist").refresh()
         self.assertEqual(obj.get_name(), "QQ歌单")
 
     @patch("platforms.QQMusic.get_json.requests.get")
@@ -128,7 +127,7 @@ class TestQQMusicPlaylist(unittest.TestCase):
 
         from platforms.QQMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("333", "playlist")
+        obj = PlaylistAlbumJson("333", "playlist").refresh()
         self.assertEqual(obj.get_songs(), [111, 222])
 
     @patch("platforms.QQMusic.get_json.requests.get")
@@ -139,18 +138,14 @@ class TestQQMusicPlaylist(unittest.TestCase):
 
         from platforms.QQMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("444", "playlist")
+        obj = PlaylistAlbumJson("444", "playlist").refresh()
         self.assertEqual(obj.get_id(), "444")
 
     @patch("platforms.QQMusic.get_json.requests.get")
     def test_typename_invalid(self, mock_get):
-        # QQMusic 在 API 失败后 fallback 到 _load_from_cache()
-        # 缓存不存在时抛 FileNotFoundError（而非 ValueError）
-        mock_get.return_value.json.return_value = {}
-
         from platforms.QQMusic.get_json import PlaylistAlbumJson
 
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaises(ValueError):
             PlaylistAlbumJson("999", "invalid_type")
 
 
@@ -165,7 +160,7 @@ class TestQQMusicAlbum(unittest.TestCase):
 
         from platforms.QQMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("777", "album")
+        obj = PlaylistAlbumJson("777", "album").refresh()
         self.assertEqual(obj.get_name(), "QQ专辑")
 
     @patch("platforms.QQMusic.get_json.requests.get")
@@ -176,7 +171,7 @@ class TestQQMusicAlbum(unittest.TestCase):
 
         from platforms.QQMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("777", "album")
+        obj = PlaylistAlbumJson("777", "album").refresh()
         self.assertEqual(obj.get_songs(), [333, 444])
 
 
@@ -204,7 +199,7 @@ class TestKugouMusicPlaylist(unittest.TestCase):
 
         from platforms.KugouMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("12345", "playlist")
+        obj = PlaylistAlbumJson("12345", "playlist").refresh()
         self.assertEqual(obj.get_name(), "12345")
 
     @patch("platforms.KugouMusic.get_json.get_session")
@@ -223,7 +218,7 @@ class TestKugouMusicPlaylist(unittest.TestCase):
 
         from platforms.KugouMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("12345", "playlist")
+        obj = PlaylistAlbumJson("12345", "playlist").refresh()
         songs = obj.get_songs()
         self.assertIsInstance(songs, list)
         self.assertEqual(len(songs), 2)
@@ -242,7 +237,7 @@ class TestKugouMusicPlaylist(unittest.TestCase):
 
         from platforms.KugouMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("54321", "playlist")
+        obj = PlaylistAlbumJson("54321", "playlist").refresh()
         self.assertEqual(obj.get_id(), "54321")
 
     @patch("platforms.KugouMusic.get_json.get_session")
@@ -276,7 +271,7 @@ class TestKugouMusicAlbum(unittest.TestCase):
 
         from platforms.KugouMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("99999", "album")
+        obj = PlaylistAlbumJson("99999", "album").refresh()
         self.assertEqual(obj.get_name(), "酷狗专辑")
 
     @patch("platforms.KugouMusic.get_json.get_session")
@@ -297,7 +292,7 @@ class TestKugouMusicAlbum(unittest.TestCase):
 
         from platforms.KugouMusic.get_json import PlaylistAlbumJson
 
-        obj = PlaylistAlbumJson("99999", "album")
+        obj = PlaylistAlbumJson("99999", "album").refresh()
         songs = obj.get_songs()
         self.assertIsInstance(songs, list)
         self.assertEqual(songs[0]["hash"], "h1")
@@ -336,15 +331,15 @@ class TestPlatformDifferences(unittest.TestCase):
             "cdlist": [{"dissname": "q", "songlist": [{"songid": 1}]}]
         }
 
+        from platforms.KugouMusic.get_json import PlaylistAlbumJson as KugouJson
         from platforms.NeteaseCloudMusic.get_json import (
             PlaylistAlbumJson as NeteaseJson,
         )
-        from platforms.KugouMusic.get_json import PlaylistAlbumJson as KugouJson
         from platforms.QQMusic.get_json import PlaylistAlbumJson as QQJson
 
-        netease_songs = NeteaseJson("1", "playlist").get_songs()
-        kugou_songs = KugouJson("1", "playlist").get_songs()
-        qq_songs = QQJson("1", "playlist").get_songs()
+        netease_songs = NeteaseJson("1", "playlist").refresh().get_songs()
+        kugou_songs = KugouJson("1", "playlist").refresh().get_songs()
+        qq_songs = QQJson("1", "playlist").refresh().get_songs()
 
         # Netease 和 QQ 返回 list[int]
         self.assertIsInstance(netease_songs[0], int)

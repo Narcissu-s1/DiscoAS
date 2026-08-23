@@ -4,11 +4,12 @@
 使用requests.Session复用连接，提升响应速度
 """
 
-import json
 import os
 import sys
 
 import requests
+
+from platforms.provider_common import CollectionProvider, response_json
 
 # 添加 settings 目录到路径，导入统一的路径管理模块
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings'))
@@ -35,20 +36,21 @@ def get_session() -> requests.Session:
     return _session
 
 
-class PlaylistAlbumJson:
+class PlaylistAlbumJson(CollectionProvider):
     """网易云音乐歌单/专辑JSON获取类"""
 
+    platform_name = "NeteaseCloudMusic"
+
     def __init__(self, playlist_album_id: str, typename: str):
-        self.playlist_album_id = playlist_album_id
-        self.typename = typename
+        super().__init__(playlist_album_id, typename)
         self.playlist_album_name: str = ""
         self.playlist_album_json: dict | list = {}
-
-        self._fetch_data()
 
     def _fetch_data(self) -> None:
         """获取歌单/专辑数据"""
         session = get_session()
+        self.playlist_album_name = ""
+        self.playlist_album_json = {}
 
         if self.typename == "playlist":
             # 获取歌单详情
@@ -61,7 +63,7 @@ class PlaylistAlbumJson:
             }
             try:
                 response = session.get(url, params=params, timeout=10)
-                data = response.json()
+                data = response_json(response)
 
                 if "playlist" in data:
                     self.playlist_album_name = data["playlist"].get("name", "")
@@ -80,7 +82,7 @@ class PlaylistAlbumJson:
             }
             try:
                 response = session.get(url, params=params, timeout=10)
-                data = response.json()
+                data = response_json(response)
 
                 if "album" in data:
                     self.playlist_album_name = data["album"].get("name", "")
@@ -94,6 +96,32 @@ class PlaylistAlbumJson:
             raise ValueError("typename must be 'playlist' or 'album'")
 
         print(f"已获取{self.typename}: {self.playlist_album_name}")
+
+    def _load_from_cache(self) -> bool:
+        cache_data = self._read_cache()
+        if not cache_data:
+            return False
+
+        self.playlist_album_name = cache_data.get("playlist_album_name", "")
+        song_ids = cache_data.get("song_ids", [])
+        cover_url = cache_data.get("coverUrl", "")
+        if self.typename == "playlist":
+            self.playlist_album_json = {
+                "playlist": {
+                    "name": self.playlist_album_name,
+                    "trackIds": [{"id": song_id} for song_id in song_ids],
+                    "coverImgUrl": cover_url,
+                }
+            }
+        else:
+            self.playlist_album_json = {
+                "album": {
+                    "name": self.playlist_album_name,
+                    "songs": [{"id": song_id} for song_id in song_ids],
+                    "picUrl": cover_url,
+                }
+            }
+        return True
 
     def get_id(self) -> str:
         return self.playlist_album_id
@@ -122,12 +150,11 @@ class PlaylistAlbumJson:
                         if "id" in track:
                             songs.append(track["id"])
 
-        elif self.typename == "album":
+        elif self.typename == "album" and "album" in self.playlist_album_json:
             # 从专辑中提取歌曲ID
-            if "album" in self.playlist_album_json:
-                for song in self.playlist_album_json["album"].get("songs", []):
-                    if "id" in song:
-                        songs.append(song["id"])
+            for song in self.playlist_album_json["album"].get("songs", []):
+                if "id" in song:
+                    songs.append(song["id"])
 
         return songs
 
@@ -154,10 +181,8 @@ class PlaylistAlbumJson:
             "coverUrl": cover_url
         }
 
-        filepath = os.path.join(path, f"{self.playlist_album_id}.json")
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-            print(f"已保存{self.typename} {self.playlist_album_id} {self.playlist_album_name} 到 {path}")
+        self._write_cache(data)
+        print(f"已保存{self.typename} {self.playlist_album_id} {self.playlist_album_name} 到 {path}")
 
 
 if __name__ == '__main__':
@@ -170,7 +195,8 @@ if __name__ == '__main__':
         playlist_id = "8285082830"
         typename = "playlist"
 
-    playlist = PlaylistAlbumJson(playlist_id, typename)
+    playlist = PlaylistAlbumJson(playlist_id, typename).refresh()
     print(f"名称: {playlist.get_name()}")
     print(f"歌曲数量: {len(playlist.get_songs())}")
-    playlist.save()
+    if not playlist.is_stale:
+        playlist.save()

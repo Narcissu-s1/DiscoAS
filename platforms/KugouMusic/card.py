@@ -132,7 +132,8 @@ class SongCard:
                     raw_cover = album_res['data'].get('sizable_cover') or album_res['data'].get('imgurl', '')
                     if raw_cover:
                         return raw_cover.replace('{size}', '400')
-            except Exception: pass
+            except Exception:
+                pass
 
         # 方法2：通过 hash 获取封面
         fallback_url = f"http://m.kugou.com/app/i/getSongInfo.php?cmd=playInfo&hash={self.song_hash}"
@@ -141,7 +142,8 @@ class SongCard:
             raw_cover = fallback_res.get('imgUrl', fallback_res.get('pic', ''))
             if raw_cover:
                 return raw_cover.replace('{size}', '400')
-        except Exception: pass
+        except Exception:
+            pass
 
         return self.mystery_pic_url or ""
 
@@ -193,14 +195,28 @@ class SongCard:
                 if not filename.lower().endswith('.mp3'):
                     filename += ".mp3"
 
-        # 只需要 filename 和 hash 两个必要参数
+        # 明确要求酷狗保留当前队列，并把所选歌曲插入后立即播放。
         payload = {
             "Files": [
                 {
                     "filename": filename,
                     "hash": self.song_hash
                 }
-            ]
+            ],
+            "Count": "1",
+            "AddPlayQueue": 1,
+            "NoPlayAds": 1,
+            "QueueInfo": {
+                "Play": "1",
+                "PlayAll": "0",
+                "Clear": "0",
+                "Insert": "1",
+                "Force": "1",
+                "IsMV": "0",
+                "Index": "0",
+                "AddToDefaultList": "0",
+                "climax": "0"
+            }
         }
 
         # 1. 转化为紧凑型 JSON 字符串
