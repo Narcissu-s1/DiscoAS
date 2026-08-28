@@ -1,6 +1,6 @@
 # DiscoAS - 发现一首歌！
 
-<img src=".\src\DiscoAS.png" width="50%">
+<img src="src/DiscoAS.png" width="50%">
 
 ## 前言
 
@@ -11,9 +11,9 @@
 ---
 ## 所以，怎么用？
 
-<img src=".\src\Cap_showhow.gif" width="100%">
+<img src="src/Cap_showhow.gif" width="100%">
 
-- 按下快捷键 *（或着通过系统托盘）*，**发现**一首歌！
+- 按下默认快捷键 `Alt+D`（可在设置中修改），或左键单击系统托盘图标，**发现**一首歌！
 - 选择一首歌
 - 然后听就完事了！
 
@@ -23,49 +23,50 @@
 
 ## 所以，怎么用上呢？
 
-右边有一个release的区域，你能在那边下载到压缩包，解压后，双击运行```DiscoAS.exe```文件即可启动程序。
+上游 [Releases](https://github.com/caipeilan/DiscoAS/releases) 中有打包版本时，可以下载压缩包，解压后双击 `DiscoAS.exe`。当前源码中的平台解析、播放控制和设置保存功能可能新于已发布版本；需要这些最新改动时，请按下方“Python 环境下运行”从源码启动。
 
 ---
 
 ## 那啥，前置？
 
-目前操作系统仅支持 Windows 11，音乐软件目前仅支持：
+当前仅支持 Windows 桌面系统，主要在 Windows 11 上验证。音乐软件目前支持：
 
 - 网易云音乐
 - QQ音乐
 - 酷狗音乐
 - Spotify
 
-由于是通过scheme url唤起本地应用（用过苹果的快捷指令的话，应该对这些词不陌生吧´-ω-)b），所以还请先安装你所使用的音乐平台对应的桌面软件捏。
+请先安装所使用平台的桌面客户端。QQ 音乐、酷狗音乐和 Spotify 通过 Scheme 唤起客户端；网易云音乐使用本地后台控制通道。
+
+### 各平台当前播放行为
+
+| 平台 | 歌单/专辑 | 选择歌曲后的行为 |
+| --- | --- | --- |
+| 网易云音乐 | 均支持 | 将歌曲加入当前播放队列并立即播放，不主动操作播放器窗口。若网易云已经在运行但未启用后台控制，需要从托盘完全退出网易云后再试一次。 |
+| QQ 音乐 | 均支持 | 可以播放目标歌曲，但当前会切换到 QQ 音乐的“试听列表”，尚不能可靠地追加到原播放队列。 |
+| 酷狗音乐 | 均支持 | 保留当前队列，将目标歌曲插入队列并立即播放，不添加到默认列表。 |
+| Spotify | 均支持 | 通过 `spotify:track:` 唤起目标歌曲，不保证保留或修改 Spotify 当前队列。 |
 
 程序预设了项目作者他那4500+曲目的小众歌单，如果你想要使用自己的歌单的话：
 
 - 右键系统托盘图标进入「设置」
 - 进入「发现设置」，选择「添加歌单」
-- 选择歌单对应的平台，输入歌单ID，选择歌单类型（用户歌单or专辑）
-- 启用并加载该专辑
-- 「应用并保存」，等待应用重启
+- 选择对应平台，输入 ID，选择类型（歌单或专辑）
+- 点击「加载」验证、获取真实名称并写入本地缓存，然后启用该项
+- 设置会自动保存并立即生效，无需重启应用；同一时间只能启用一个歌单或专辑
 
-对于歌单ID↓
+### 各平台需要填写什么
 
-```bash
-# 网易云音乐歌单id可以通过「分享」「复制链接」的方式获得
-https://music.163.com/playlist?id={网易云音乐歌单id}
+输入框通常只填写链接中的 ID；只有酷狗歌单支持直接粘贴完整分享链接。
 
-# QQ音乐歌单id需要将分享链接放在浏览器中才能获得
-# 待浏览器跳转后，网址栏会显示如下链接
-https://y.qq.com/n/ryqq_v2/playlist/{QQ音乐歌单id}?{问号后的参数不用理会}
+| 平台 | 歌单 | 专辑 |
+| --- | --- | --- |
+| 网易云音乐 | `https://music.163.com/playlist?id=123` 中的 `123` | `https://music.163.com/album?id=456` 中的 `456` |
+| QQ 音乐 | `https://y.qq.com/n/ryqq_v2/playlist/123` 中的 `disstid`：`123` | 专辑链接中的数字 `albumid` 或字符串 `albummid` |
+| 酷狗音乐 | 完整的 `https://t1.kugou.com/短码`、其中的短码，或旧版数字 `specialid`；兼容新版 `share_type=collect` 收藏集合 | 数字 `album_id` 或专辑分享短码 |
+| Spotify | `https://open.spotify.com/playlist/ID` 中的 `ID` | `https://open.spotify.com/album/ID` 中的 `ID` |
 
-# 酷狗音乐支持直接填写完整分享链接或其中的短码
-# 兼容旧版 special 歌单和新版 share_type=collect 收藏集合
-https://t1.kugou.com/{酷狗音乐分享短码}
-
-# Spotify歌单id可以通过「分享」的方式获得
-https://open.spotify.com/playlist/{Spotify歌单id}?si={不用管}
-
-```
-
-Spotify 未配置访问令牌时会使用 Embed 页面数据，这类数据可能只包含前 50 首，程序会将其标记为不完整。若要通过官方 Web API 完整分页，请先在 PowerShell 中设置访问令牌后再启动：
+Spotify 未配置访问令牌时会使用 Embed 页面数据，通常最多提供前 50 首，程序会将其标记为不完整。若要通过官方 Web API 完整分页，请先在 PowerShell 中设置访问令牌后再启动：
 
 ```powershell
 $env:SPOTIFY_ACCESS_TOKEN="你的 Spotify OAuth 访问令牌"
@@ -76,30 +77,47 @@ Spotify 开发模式下，官方 API 只能读取当前账号拥有或参与协�
 
 ---
 
-## Python环境下运行
+## Python 环境下运行
 
-在你克隆这个库后，依赖肯定是要安装的
+推荐使用 Python 3.12 和项目虚拟环境。先用 `python --version` 确认当前命令指向 Python 3.12；如果系统安装了多个 Python，请用 Python 3.12 的可执行文件替代下方的 `python`。以下命令在 PowerShell 中执行：
 
-```bash
-pip install -r requirements.txt
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\start.cmd
 ```
 
-然后
+`start.cmd` 固定使用 `.venv\Scripts\pythonw.exe` 后台启动；如果需要查看调试输出，请直接运行：
 
-```bash
-python main.py
+```powershell
+.\.venv\Scripts\python.exe main.py
 ```
 
-即可启动程序
+开发校验：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check .
+```
+
+### 设置与缓存位置
+
+- 音乐设置：`user_data/settings/music_setting.json`
+- 界面设置：`user_data/settings/gui_setting.json`
+- 平台缓存：`user_data/<平台>/playlist/` 和 `user_data/<平台>/album/`
+- 单实例锁：`%APPDATA%\DiscoAS\single_instance.lock`
+
+远端刷新失败但已有有效缓存时，程序会继续使用上一份缓存，并将本次结果标记为陈旧缓存。
 
 ---
 
 ## 打包
 
-该项目使用 Nuitka 打包
+该项目使用 Nuitka 打包。`requirements.txt` 不包含 Nuitka，打包前需要单独安装：
 
-```bash
-python -m nuitka --standalone `
+```powershell
+.\.venv\Scripts\python.exe -m pip install Nuitka
+.\.venv\Scripts\python.exe -m nuitka --standalone `
   --windows-disable-console `
   --assume-yes-for-downloads `
   --include-package=log `
@@ -137,24 +155,21 @@ A:设置里面可以调整的说。
 Q:怎么歌曲播放完后直接停止播放/重复播放/播放歌单外歌曲？
 
 ```bash
-A:这个项目管不了音乐平台的播放列表的说（没有那个威能）
-确保原本播放列表和启用的歌单一致即可。
+A:DiscoAS只负责把你选中的歌曲交给对应客户端，不接管客户端的循环/随机播放模式。
+当前队列行为因平台而异：网易云和酷狗会追加到当前队列；QQ会切到“试听列表”；Spotify不保证队列行为。
 ```
 
 Q:为什么不支持同时启用多个歌单( ´•̥̥̥ω•̥̥̥` )
 
 ```bash
 A:
-①如果同时启用不同平台的歌单，那么音乐软件之间的声音会冲突（这个项目只管播放，不管暂停）；
-②如果需要启用同一平台的不同歌单，那么完全可以在原平台创建一个新歌单；
-③需要写大量的逻辑去处理同名歌曲；
-④代码不允许，框架一开始就被写死了（
+当前设置模型只允许启用一个歌单或专辑。如果想混合多个来源，建议先在对应音乐平台创建一个合并后的歌单。
 ```
 
 Q:怎么做到唤起本地应用的？
 
 ```bash
-A:通过scheme_url协议，一般来说，通过查看音乐平台对应网页的F12信息(来源、网络)，可以推断出该平台的协议格式。
+A:QQ音乐、酷狗音乐和Spotify使用各自的Scheme协议；网易云音乐使用本机CDP/WebSocket后台控制通道，把歌曲加入当前播放队列。
 ```
 
 Q:web接口是怎么扒的？
@@ -181,9 +196,10 @@ A:充電器
 
 ## 目前已知
 
-- QQ音乐的窗口无法在选择完成后关闭，确认原因为，没从歌曲json中提取歌曲注释导致窗口名称无法匹配
-- 秘密歌曲选择后无法关闭窗口，虽然改起来很快，但是我突然想把这点当 **feature** 保留（毕竟还是要让用户知道自己随机到了什么歌）
-- 由于是vibe coding项目，相比于一般python项目缺了许多东西（比如CICD啥的）
+- QQ 音乐当前使用 `playsong` Scheme，播放目标歌曲时会切换到“试听列表”，尚未实现保留原播放队列。
+- Spotify Embed 降级数据可能只有前 50 首；需要完整分页时必须提供有效的 `SPOTIFY_ACCESS_TOKEN`。
+- 网易云后台控制依赖当前客户端内部结构；客户端升级后若结构变化，可能需要同步适配。
+- 当前仓库还没有 CI/CD 工作流。
 
 ## 未来
 

@@ -98,10 +98,15 @@ except Exception as e:
 
 # 全局引用，用于托盘控制
 _main_window = None
+_settings_window = None
 _tray_icon = None
 _shortcut_enabled = True
 _hotkey_id = None
 _shortcut_action = None  # 托盘菜单中的快捷键开关项
+_discover_action = None
+_settings_action = None
+_restart_action = None
+_quit_action = None
 _network_manager = None  # 全局网络管理器
 
 # 全局图片缓存 {url_or_path: bytes}
@@ -128,6 +133,10 @@ def _fetch_image_data(url_or_path: str) -> bytes:
 # 每批是一个 discover_songs() 返回的列表
 _cached_song_batches = []
 
+# 设置变化时递增代次，旧线程只能完成请求，不能提交旧结果。
+_runtime_generation = 0
+_cache_lock = threading.RLock()
+
 # 预加载目标批数
 _preload_target_batches = 0
 
@@ -139,9 +148,37 @@ _global_discover_app_instance = None
 
 # 预加载线程
 _preload_thread = None
+_preload_thread_generation = None
 
 # 预加载歌曲数据线程
 _preload_songs_thread = None
+
+
+def get_runtime_generation():
+    """返回当前运行态代次。"""
+    with _cache_lock:
+        return _runtime_generation
+
+
+def invalidate_song_cache():
+    """使旧歌曲任务失效，并原子清空运行时缓存。"""
+    global _runtime_generation, _need_refresh_songs
+
+    with _cache_lock:
+        _runtime_generation += 1
+        _cached_song_batches.clear()
+        _image_cache.clear()
+        generation = _runtime_generation
+    _need_refresh_songs = True
+    Playlist.clear_cache()
+    return generation
+
+
+def _take_cached_song_batch():
+    with _cache_lock:
+        if not _cached_song_batches:
+            return None
+        return _cached_song_batches.pop(0)
 
 
 def preload_next_batch(discover_app):
@@ -149,7 +186,7 @@ def preload_next_batch(discover_app):
     在后台线程预加载多批歌曲（歌曲详情 + 封面图片），
     并将结果存入 _cached_song_batches，支持缓存批数设置。
     """
-    global _preload_thread, _preload_target_batches
+    global _preload_thread, _preload_target_batches, _preload_thread_generation
 
     # 获取缓存批数设置
     cache_batches = discover_app.music_setting.cache_batches
@@ -159,54 +196,75 @@ def preload_next_batch(discover_app):
         print("缓存批数设置为0，禁用预加载")
         return
 
+    generation = get_runtime_generation()
     _preload_target_batches = cache_batches
     print(f"开始预加载，目标缓存批数: {cache_batches}")
 
-    if _preload_thread and _preload_thread.is_alive():
-        # 如果预加载线程正在运行，检查是否需要补充更多批次
-        print("预加载线程已在运行中，检查是否需要补充批次...")
-        return
+    with _cache_lock:
+        if (
+            _preload_thread
+            and _preload_thread.is_alive()
+            and _preload_thread_generation == generation
+        ):
+            print("当前设置的预加载线程已在运行")
+            return
+        current_batches = len(_cached_song_batches)
+        _preload_thread_generation = generation
 
     def _preload():
-        global _cached_song_batches
         try:
             # 计算还需要加载多少批
-            current_batches = len(_cached_song_batches)
-            batches_to_load = _preload_target_batches - current_batches
+            batches_to_load = cache_batches - current_batches
 
             if batches_to_load <= 0:
-                print(f"缓存已足够，当前 {current_batches} 批 >= 目标 {_preload_target_batches} 批")
+                print(f"缓存已足够，当前 {current_batches} 批 >= 目标 {cache_batches} 批")
                 return
 
             print(f"需要补充 {batches_to_load} 批歌曲...")
 
             for i in range(batches_to_load):
+                if generation != get_runtime_generation():
+                    print("预加载设置已变化，丢弃旧任务")
+                    return
                 print(f"开始预加载第 {i+1} 批歌曲...")
                 # 1. 获取下一批歌曲
                 songs = discover_app.discover_songs()
+                if generation != get_runtime_generation():
+                    return
                 # 2. 加载每首歌的详情（含图片URL）
                 for song in songs:
                     if not song.have_loaded:
                         song.load_song_detail()
+                    if generation != get_runtime_generation():
+                        return
                 # 3. 下载封面图片到缓存（支持URL和本地路径）
-                count = 0
+                loaded_images = {}
                 for song in songs:
                     url = song.get_album_pic_url()
-                    if url and url not in _image_cache:
+                    with _cache_lock:
+                        already_cached = url in _image_cache
+                    if url and not already_cached:
                         try:
-                            _image_cache[url] = _fetch_image_data(url)
-                            count += 1
+                            loaded_images[url] = _fetch_image_data(url)
                         except Exception as e:
                             print(f"图片预加载失败: {url[:50]}... - {e}")
-                # 4. 将这批歌曲存入全局缓存
-                _cached_song_batches.append(songs)
-                print(f"第 {i+1} 批预加载完成：{len(songs)} 首歌曲，新增 {count} 张图片")
+                # 4. 仅允许当前代次原子提交结果
+                with _cache_lock:
+                    if generation != _runtime_generation:
+                        print("预加载设置已变化，拒绝提交旧缓存")
+                        return
+                    _image_cache.update(loaded_images)
+                    _cached_song_batches.append(songs)
+                print(f"第 {i+1} 批预加载完成：{len(songs)} 首歌曲，新增 {len(loaded_images)} 张图片")
 
                 # 每批之间稍作延迟，避免过于频繁
                 time.sleep(0.1)
 
-            total_songs = sum(len(batch) for batch in _cached_song_batches)
-            print(f"所有预加载完成：共 {len(_cached_song_batches)} 批，总计 {total_songs} 首歌曲，缓存共 {len(_image_cache)} 张图片")
+            with _cache_lock:
+                total_songs = sum(len(batch) for batch in _cached_song_batches)
+                batch_count = len(_cached_song_batches)
+                image_count = len(_image_cache)
+            print(f"所有预加载完成：共 {batch_count} 批，总计 {total_songs} 首歌曲，缓存共 {image_count} 张图片")
         except Exception as e:
             print(f"预加载失败: {e}")
             traceback.print_exc()
@@ -526,7 +584,7 @@ class DiscoverOverlay(QMainWindow):
     """极简全屏透明浮窗主界面"""
 
     # 自定义信号：歌曲加载完成
-    songs_loaded = pyqtSignal(list)
+    songs_loaded = pyqtSignal(int, int, list, list)
 
     # 窗口透明度属性
     window_opacity = 1.0
@@ -537,6 +595,8 @@ class DiscoverOverlay(QMainWindow):
         self.songs: list = []
         self.next_songs: list = []  # 缓存下一批歌曲
         self.load_thread = None
+        self._load_generation = 0
+        self._runtime_generation = get_runtime_generation()
 
         # 每次创建窗口时重新加载音乐设置，确保使用最新设置
         self.discover_app.music_setting.load()
@@ -555,7 +615,7 @@ class DiscoverOverlay(QMainWindow):
         self.songs_loaded.connect(self._on_songs_loaded)
 
         # 检查是否需要刷新歌曲
-        global _need_refresh_songs, _user_played_song, _cached_song_batches
+        global _need_refresh_songs, _user_played_song
 
         # 如果用户播放了歌曲，下次进入需要刷新（清除缓存）
         if _user_played_song:
@@ -571,10 +631,12 @@ class DiscoverOverlay(QMainWindow):
         # 优先判断：预加载是否已经准备好了新歌曲
         # 只要 _cached_song_batches 不为空，说明预加载线程已经完成，
         # 直接使用，避免重新异步加载导致"加载中..."延迟
-        if _cached_song_batches:
+        batch = _take_cached_song_batch()
+        if batch is not None:
             # 取出一批歌曲使用
-            batch = _cached_song_batches.pop(0)
-            print(f"使用预加载缓存的歌曲，共 {len(batch)} 首（跳过刷新逻辑），剩余 {len(_cached_song_batches)} 批")
+            with _cache_lock:
+                remaining_batches = len(_cached_song_batches)
+            print(f"使用预加载缓存的歌曲，共 {len(batch)} 首（跳过刷新逻辑），剩余 {remaining_batches} 批")
             _need_refresh_songs = False
             self.songs = batch
             # 保留剩余的缓存，用于下次使用
@@ -721,12 +783,15 @@ class DiscoverOverlay(QMainWindow):
         # 显示加载状态
         self._display_loading()
 
-        # 使用保守的线程管理：确保上一个线程完成后再启动新线程
-        if self.load_thread and self.load_thread.is_alive():
-            return
-
-        # 后台线程加载
-        self.load_thread = threading.Thread(target=self._load_songs_async, daemon=True)
+        # 新代次可与旧线程并行；旧线程的结果会在信号回调处被丢弃。
+        self._load_generation += 1
+        load_generation = self._load_generation
+        runtime_generation = self._runtime_generation
+        self.load_thread = threading.Thread(
+            target=self._load_songs_async,
+            args=(load_generation, runtime_generation),
+            daemon=True,
+        )
         self.load_thread.start()
 
     def _preload_images(self):
@@ -746,29 +811,38 @@ class DiscoverOverlay(QMainWindow):
 
         print(f"预加载完成，共 {len(_image_cache)} 张图片")
 
-    def _load_songs_async(self):
+    def _load_songs_async(self, load_generation, runtime_generation):
         """异步加载歌曲"""
         try:
             print("开始加载歌曲...")
             # 加载显示用歌曲
-            self.songs = self.discover_app.discover_songs()
-            print(f"加载到 {len(self.songs)} 首歌曲")
+            songs = self.discover_app.discover_songs()
+            if runtime_generation != get_runtime_generation():
+                return
+            print(f"加载到 {len(songs)} 首歌曲")
 
             # 先加载歌曲详情（这样才能获取到图片URL）
-            for song in self.songs:
+            for song in songs:
                 if not song.have_loaded:
                     song.load_song_detail()
+                if runtime_generation != get_runtime_generation():
+                    return
 
             # 加载下一批缓存（只加载歌曲，不下载图片）
-            self.next_songs = self.discover_app.discover_songs()
+            next_songs = self.discover_app.discover_songs()
+            if runtime_generation != get_runtime_generation():
+                return
             print("缓存加载完成")
 
             # 使用信号槽更新UI - 确保使用 QueuedConnection
-            self.songs_loaded.emit(self.songs)
+            self.songs_loaded.emit(load_generation, runtime_generation, songs, next_songs)
             print("信号已发送")
         except Exception as e:
             print(f"加载歌曲失败: {e}")
             traceback.print_exc()
+            if runtime_generation != get_runtime_generation():
+                print("忽略已失效加载任务的错误提示")
+                return
             # 根据异常类型弹窗
             if isinstance(e, FileNotFoundError):
                 try:
@@ -781,12 +855,47 @@ class DiscoverOverlay(QMainWindow):
                         )
                 except Exception:
                     pass
-            self.songs_loaded.emit([])
+            if runtime_generation == get_runtime_generation():
+                self.songs_loaded.emit(load_generation, runtime_generation, [], [])
 
-    def _on_songs_loaded(self, songs):
+    def _on_songs_loaded(self, load_generation, runtime_generation, songs, next_songs):
         """歌曲加载完成回调"""
+        if (
+            load_generation != self._load_generation
+            or runtime_generation != self._runtime_generation
+            or runtime_generation != get_runtime_generation()
+        ):
+            print("忽略已失效的浮窗歌曲加载结果")
+            return
         self.songs = songs
+        self.next_songs = next_songs
         self._display_songs()
+
+    def invalidate_pending_loads(self):
+        """让当前浮窗仍在运行的旧加载任务失效。"""
+        self._load_generation += 1
+        self._runtime_generation = get_runtime_generation()
+
+    def reload_for_settings(self):
+        """在当前进程内按新设置重新加载歌曲与界面。"""
+        self.invalidate_pending_loads()
+        self.discover_app.gui_setting.load()
+        self.discover_app.music_setting.load()
+        self.gui_setting = self.discover_app.gui_setting
+        self.songs = []
+        self.next_songs = []
+        self._setup_ui()
+        self._load_songs()
+
+    def apply_visual_settings(self):
+        """不重新抽取歌曲，只重建当前浮窗的样式与尺寸。"""
+        self.discover_app.gui_setting.load()
+        self.gui_setting = self.discover_app.gui_setting
+        self._setup_ui()
+        if self.songs:
+            self._display_songs()
+        else:
+            self._display_loading()
 
     def _get_loading_style(self):
         """获取加载中小长方形的样式"""
@@ -981,13 +1090,14 @@ class DiscoverOverlay(QMainWindow):
 
     def _handle_cancel_state(self):
         """处理用户取消/关闭时的缓存状态，供 _on_close 和 keyPressEvent 共用"""
-        global _cached_song_batches, _need_refresh_songs, _user_played_song
+        global _need_refresh_songs, _user_played_song
 
         if self.discover_app.music_setting.refreshing_after_cancel:
             _need_refresh_songs = True
             print("取消选择后刷新=True，下次进入将刷新")
-        elif not _user_played_song:
-            _cached_song_batches.insert(0, self.songs.copy())
+        elif not _user_played_song and self._runtime_generation == get_runtime_generation():
+            with _cache_lock:
+                _cached_song_batches.insert(0, self.songs.copy())
             print("用户未选歌，将当前歌曲插回队头")
         else:
             print("用户已选歌，当前歌曲已释放，保留其他预加载批次")
@@ -1109,6 +1219,7 @@ _global_discover_app = None
 def create_tray_icon(app, discover_app):
     """创建系统托盘"""
     global _tray_icon, _main_window, _shortcut_enabled, _shortcut_action, _global_app, _global_discover_app
+    global _discover_action, _settings_action, _restart_action, _quit_action
 
     # _main_window 应该是 DiscoverOverlay 窗口对象，不是 discover_app
     # _main_window 在 show_overlay 中设置
@@ -1139,6 +1250,7 @@ def create_tray_icon(app, discover_app):
 
     # 发现歌曲
     discover_action = QAction(_("discover"), menu)
+    _discover_action = discover_action
     font = QFont()
     font.setBold(True)
     discover_action.setFont(font)
@@ -1149,6 +1261,7 @@ def create_tray_icon(app, discover_app):
 
     # 设置
     settings_action = QAction(_("settings"), menu)
+    _settings_action = settings_action
     settings_action.triggered.connect(open_settings)
     menu.addAction(settings_action)
 
@@ -1163,6 +1276,7 @@ def create_tray_icon(app, discover_app):
 
     # 重启
     restart_action = QAction(_("restart"), menu)
+    _restart_action = restart_action
     restart_action.triggered.connect(restart_from_tray)
     menu.addAction(restart_action)
 
@@ -1170,6 +1284,7 @@ def create_tray_icon(app, discover_app):
 
     # 退出
     quit_action = QAction(_("quit"), menu)
+    _quit_action = quit_action
     quit_action.triggered.connect(app.quit)
     menu.addAction(quit_action)
 
@@ -1190,6 +1305,22 @@ def create_tray_icon(app, discover_app):
     _tray_icon = tray
 
     return tray
+
+
+def refresh_translated_ui():
+    """即时刷新无需重建进程的托盘文字。"""
+    if _tray_icon:
+        _tray_icon.setToolTip("DiscoAS - " + _("discover"))
+    if _discover_action:
+        _discover_action.setText(_("discover"))
+    if _settings_action:
+        _settings_action.setText(_("settings"))
+    if _shortcut_action:
+        _shortcut_action.setText(_("pause_shortcut") if _shortcut_enabled else _("enable_shortcut"))
+    if _restart_action:
+        _restart_action.setText(_("restart"))
+    if _quit_action:
+        _quit_action.setText(_("quit"))
 
 
 # 全局快捷键widget
@@ -1262,17 +1393,59 @@ def show_overlay(app, discover_app):
     print("窗口已显示")
 
 
+def apply_runtime_settings(discover_app, *, reload_songs=False, reload_visual=False):
+    """在当前进程内重新加载配置，并只刷新受影响的运行态。"""
+    discover_app.gui_setting.load()
+    discover_app.music_setting.load()
+    discover_app._apply_settings()
+
+    with contextlib.suppress(BaseException):
+        i18n.set_language(discover_app.gui_setting.language)
+
+    if reload_songs:
+        invalidate_song_cache()
+        if _main_window is not None:
+            if _main_window.isVisible():
+                _main_window.reload_for_settings()
+            else:
+                _main_window.invalidate_pending_loads()
+        preload_next_batch(discover_app)
+    elif reload_visual and _main_window is not None and _main_window.isVisible():
+        _main_window.apply_visual_settings()
+
+
 def open_settings():
     """打开设置窗口"""
+    global _settings_window
     try:
-        settings_window = SettingsWindow()
-        settings_window.show()
+        if _settings_window is not None and _settings_window.isVisible():
+            _settings_window.raise_()
+            _settings_window.activateWindow()
+            return
+        _settings_window = SettingsWindow()
+        _settings_window.show()
     except Exception as e:
         print(f"打开设置窗口失败: {e}")
 
 
+def reopen_settings_window(old_window):
+    """语言变化后用新窗口替换旧窗口，避免在同一 Qt 对象上重复初始化。"""
+    global _settings_window
+
+    geometry = old_window.geometry()
+    page_index = old_window.stack.currentIndex()
+    old_window.close()
+    _settings_window = SettingsWindow()
+    _settings_window.setGeometry(geometry)
+    _settings_window.stack.setCurrentIndex(page_index)
+    button = _settings_window.btn_group.button(page_index)
+    if button:
+        button.setChecked(True)
+    _settings_window.show()
+
+
 def restart_from_tray() -> None:
-    """从托盘菜单重启应用，复用 SettingsWindow.restart_application 逻辑"""
+    """从托盘菜单手动重启应用。"""
     import os
     import subprocess
     import sys

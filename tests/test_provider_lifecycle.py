@@ -728,16 +728,22 @@ def test_loaded_playlist_name_replaces_existing_placeholder():
     type_widget = MagicMock()
     type_widget.currentData.return_value = "playlist"
     name_widget = MagicMock()
+    enabled_widget = MagicMock()
+    enabled_checkbox = MagicMock()
+    enabled_checkbox.isChecked.return_value = False
+    enabled_widget.findChild.return_value = enabled_checkbox
     table = MagicMock()
     widgets = {
         (0, 0): platform_widget,
         (0, 1): id_widget,
         (0, 2): type_widget,
         (0, 3): name_widget,
+        (0, 4): enabled_widget,
     }
     table.cellWidget.side_effect = lambda row, column: widgets[(row, column)]
     window = MagicMock()
     window.table_pl = table
+    window._save_playlist_table.return_value = True
 
     provider = MagicMock()
     provider.refresh.return_value = provider
@@ -757,3 +763,4 @@ def test_loaded_playlist_name_replaces_existing_placeholder():
 
     provider.save.assert_called_once_with()
     name_widget.setText.assert_called_once_with("Νάρκισσος喜欢的音乐")
+    window._save_playlist_table.assert_called_once_with(force_runtime_reload=False)

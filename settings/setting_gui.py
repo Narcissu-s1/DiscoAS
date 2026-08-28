@@ -3,7 +3,7 @@ import datetime
 import os
 import sys
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -161,6 +161,8 @@ class FloatSlider(QWidget):
 class SettingsWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self._autosave_ready = False
+        self._playlist_save_scheduled = False
 
         # 1. 加载后端逻辑
         self.pa_setting = PASetting()
@@ -232,17 +234,14 @@ class SettingsWindow(QMainWindow):
 
         left_layout.addStretch()
 
-        # 底部按钮
-        self.btn_apply = QPushButton(_("apply_and_save"))
-        self.btn_apply.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_apply.setMinimumHeight(40)
-        self.btn_apply.clicked.connect(self.save_all_settings)
-
+        # 设置自动保存，仅保留关闭按钮。
+        self.lbl_save_status = QLabel("")
+        self.lbl_save_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.btn_close = QPushButton(_("close"))
         self.btn_close.setMinimumHeight(40)
         self.btn_close.clicked.connect(self.close)
 
-        left_layout.addWidget(self.btn_apply)
+        left_layout.addWidget(self.lbl_save_status)
         left_layout.addWidget(self.btn_close)
 
         main_layout.addWidget(left_widget)
@@ -269,11 +268,55 @@ class SettingsWindow(QMainWindow):
         # 初始渲染
         self.apply_gui_theme()
 
+        self._gui_save_timer = QTimer(self)
+        self._gui_save_timer.setSingleShot(True)
+        self._gui_save_timer.setInterval(250)
+        self._gui_save_timer.timeout.connect(self._save_gui_preferences)
+        self._connect_auto_save_signals()
+        self._autosave_ready = True
+
 
     def switch_page(self, button):
         """切换页面"""
         page_id = self.btn_group.id(button)
         self.stack.setCurrentIndex(page_id)
+
+
+    def _connect_auto_save_signals(self):
+        """在全部控件初始化完成后绑定自动保存，避免构建界面时误写配置。"""
+        for spin_box in (
+            self.spin_discovered,
+            self.spin_mystery_num,
+            self.spin_cache_batches,
+        ):
+            spin_box.valueChanged.connect(lambda _value: self._save_music_preferences())
+        self.chk_mystery.toggled.connect(lambda _checked: self._save_music_preferences())
+        self.chk_refresh.toggled.connect(lambda _checked: self._save_music_preferences())
+        self.edit_mystery_cover.editingFinished.connect(self._save_music_preferences)
+        self.edit_shortcut.editingFinished.connect(self._save_shortcut)
+
+        self.slider_card_size.valueChanged.connect(self._schedule_gui_save)
+        self.slider_cancel_size.valueChanged.connect(self._schedule_gui_save)
+        self.slider_setting_size.valueChanged.connect(self._schedule_gui_save)
+
+        for mode_inputs in self.color_inputs.values():
+            for color_input in mode_inputs.values():
+                color_input.editingFinished.connect(self._save_gui_preferences)
+        for mode_previews in self.color_previews.values():
+            for color_preview in mode_previews.values():
+                color_preview.color_changed.connect(lambda _color: self._save_gui_preferences())
+
+        self.chk_auto_start.toggled.connect(self._on_auto_start_toggled)
+
+
+    def _mark_saved(self):
+        if hasattr(self, "lbl_save_status"):
+            self.lbl_save_status.setText(_("auto_saved"))
+
+
+    def _schedule_gui_save(self, _value=None):
+        if self._autosave_ready:
+            self._gui_save_timer.start()
 
 
     def init_about_page(self):
@@ -754,6 +797,18 @@ class SettingsWindow(QMainWindow):
             print(f"设置开机自启动失败: {e}")
             return False
 
+    def _on_auto_start_toggled(self, enabled):
+        if not self._autosave_ready:
+            return
+        if self._set_auto_start(enabled):
+            self._mark_saved()
+            return
+
+        self.chk_auto_start.blockSignals(True)
+        self.chk_auto_start.setChecked(not enabled)
+        self.chk_auto_start.blockSignals(False)
+        QMessageBox.warning(self, _("error"), _("auto_start_failed"))
+
     def start_shortcut_recording(self):
         """开始快捷键录制"""
         # 禁用按钮
@@ -845,6 +900,7 @@ class SettingsWindow(QMainWindow):
                 shortcut_str = "+".join(modifiers + [key_text])
                 self.edit_shortcut.setText(shortcut_str)
                 self.stop_shortcut_recording()
+                self._save_shortcut()
                 return True
 
         return super().eventFilter(obj, event)
@@ -1021,6 +1077,10 @@ class SettingsWindow(QMainWindow):
             remark_widget = self.table_pl.cellWidget(row, 3)
             remark_widget.setText(playlist_album.get_name())
 
+            chk_widget = self.table_pl.cellWidget(row, 4)
+            checkbox = chk_widget.findChild(QCheckBox, "chk_enabled")
+            if not self._save_playlist_table(force_runtime_reload=bool(checkbox and checkbox.isChecked())):
+                return
             QMessageBox.information(self, _("load_success"), _("loaded_successfully").format(name=playlist_album.get_name()))
         except Exception as e:
             QMessageBox.critical(self, _("load_failed"), _("load_error").format(error=str(e)))
@@ -1045,6 +1105,8 @@ class SettingsWindow(QMainWindow):
             if enabled_count == 0:
                 sender.setChecked(True)
                 QMessageBox.warning(self, _("must_enable_one"), _("must_enable_one_msg"))
+
+        self._schedule_playlist_save()
 
 
     def delete_current_row(self):
@@ -1071,6 +1133,7 @@ class SettingsWindow(QMainWindow):
 
                     if reply == QMessageBox.StandardButton.Yes:
                         self.table_pl.removeRow(r)
+                        self._save_playlist_table()
                     return
 
 
@@ -1084,15 +1147,18 @@ class SettingsWindow(QMainWindow):
         )
         if file_path:
             self.edit_mystery_cover.setText(file_path)
+            self._save_music_preferences()
 
 
     def switch_to_day_mode(self):
         self.gui_setting.night_mode = False
         self.apply_gui_theme()
+        self._save_gui_preferences()
 
     def switch_to_night_mode(self):
         self.gui_setting.night_mode = True
         self.apply_gui_theme()
+        self._save_gui_preferences()
 
 
     def on_language_changed(self, index):
@@ -1104,22 +1170,16 @@ class SettingsWindow(QMainWindow):
                 i18n.set_language(lang_code)
                 self.gui_setting.language = lang_code
                 self.gui_setting.save()
-                # 语言切换后先提示再重启
-                reply = QMessageBox.question(
-                    self,
-                    _("language_change"),
-                    _("restart_to_apply"),
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    self.restart_application()
-                else:
-                    # 用户选择不重启，刷新当前窗口使用新语言
-                    self.close()
-                    # 重新打开设置窗口
-                    self.__init__()
-                    self.show()
+                import Discover_gui
+
+                Discover_gui.refresh_translated_ui()
+                if Discover_gui._global_discover_app:
+                    Discover_gui.apply_runtime_settings(
+                        Discover_gui._global_discover_app,
+                        reload_visual=True,
+                    )
+
+                Discover_gui.reopen_settings_window(self)
             except Exception as e:
                 print(f"语言切换失败: {e}")
 
@@ -1137,71 +1197,55 @@ class SettingsWindow(QMainWindow):
         self.apply_gui_theme()
 
 
-    def save_all_settings(self):
-        # 0. 保存之前的平台信息
-        old_enabled_platform = None
-        old_enabled_playlist = None
-        for pl in self.pa_setting.playlist_albums:
-            if pl.enabled:
-                old_enabled_platform = pl.name
-                old_enabled_playlist = pl.playlist_album_id
-                break
+    def _save_music_preferences(self):
+        """保存会影响抽歌结果的普通设置，并刷新当前运行态。"""
+        if not self._autosave_ready:
+            return
 
-        # 记录旧的秘密歌曲封面路径
-        old_mystery_cover = self.pa_setting.mystery_song_cover
+        cover = self.edit_mystery_cover.text().strip()
+        if cover and not cover.lower().startswith(("http://", "https://")) and not os.path.isfile(cover):
+            QMessageBox.warning(self, _("error"), _("invalid_cover_path"))
+            self.edit_mystery_cover.setText(self.pa_setting.mystery_song_cover)
+            return
 
-        # 1. 保存 Music Setting
         self.pa_setting.number_of_discovered_songs = self.spin_discovered.value()
         self.pa_setting.have_mystery_song = self.chk_mystery.isChecked()
         self.pa_setting.num_of_mystery_song = self.spin_mystery_num.value()
-        self.pa_setting.mystery_song_cover = self.edit_mystery_cover.text().strip()
+        self.pa_setting.mystery_song_cover = cover
         self.pa_setting.cache_batches = self.spin_cache_batches.value()
         self.pa_setting.refreshing_after_cancel = self.chk_refresh.isChecked()
-        self.pa_setting.shortcut_key = self.edit_shortcut.text()
-
-        new_playlists = []
-        new_enabled_platform = None
-        new_enabled_playlist = None
-        for row in range(self.table_pl.rowCount()):
-            name = self.table_pl.cellWidget(row, 0).currentData()  # 使用 currentData 获取实际 ID
-            pid = self.table_pl.cellWidget(row, 1).text()
-            typename = self.table_pl.cellWidget(row, 2).currentData()  # 使用 currentData 获取实际类型
-            # 名称从 JSON 读取，不再保存 remark
-            name_label = self.table_pl.cellWidget(row, 3)
-            playlist_name = name_label.text() if name_label else ""
-
-            chk_widget = self.table_pl.cellWidget(row, 4)
-            chk = chk_widget.findChild(QCheckBox, "chk_enabled")
-            enabled = chk.isChecked() if chk else False
-
-            if enabled:
-                new_enabled_platform = name
-                new_enabled_playlist = pid
-
-            p_data = {
-                "name": name,
-                "playlist_album_id": pid,
-                "typename": typename,
-                "playlist_album_name": playlist_name,
-                "playlist_album_remark": "",
-                "update_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "enabled": enabled
-            }
-            new_playlists.append(PlaylistAlbum(p_data))
-
-        self.pa_setting.playlist_albums = new_playlists
         self.pa_setting.save()
+        self.notify_settings_changed(music_changed=True)
+        self._mark_saved()
 
-        # 2. 保存 GUI Setting
+    def _save_shortcut(self):
+        if not self._autosave_ready:
+            return
+        shortcut = self.edit_shortcut.text().strip()
+        if not shortcut:
+            self.edit_shortcut.setText(self.pa_setting.shortcut_key)
+            return
+        self.pa_setting.shortcut_key = shortcut
+        self.pa_setting.save()
+        self.notify_settings_changed(shortcut_changed=True)
+        self._mark_saved()
+
+    def _save_gui_preferences(self):
+        """校验并保存主题、颜色和尺寸设置。"""
+        if not self._autosave_ready:
+            return
+
+        for mode_inputs in self.color_inputs.values():
+            for color_input in mode_inputs.values():
+                if not QColor(color_input.text()).isValid():
+                    QMessageBox.warning(self, _("error"), _("invalid_color"))
+                    return
+
         self.gui_setting.night_mode = self.btn_night_mode.isChecked()
         self.gui_setting.card_size = self.slider_card_size.value()
         self.gui_setting.cancel_button_size = self.slider_cancel_size.value()
         self.gui_setting.setting_size = self.slider_setting_size.value()
 
-        # 3. 保存开机自启动设置
-        self._set_auto_start(self.chk_auto_start.isChecked())
-
-        # 更新 Day Colors
         for main_key in ["card", "cancel_button", "setting"]:
             target_dict = getattr(self.gui_setting, main_key)
             for sub_key in ["background", "background_hover", "border", "font_color"]:
@@ -1209,14 +1253,12 @@ class SettingsWindow(QMainWindow):
                 if lookup_key in self.color_inputs["day"]:
                     target_dict[sub_key] = self.get_input_color("day", main_key, sub_key)
 
-        # 更新 Night Colors
-        map_keys = {
+        night_keys = {
             "card": "card_night_mode",
             "cancel_button": "cancel_button_night_mode",
-            "setting": "setting_night_mode"
+            "setting": "setting_night_mode",
         }
-
-        for main_key, attr_name in map_keys.items():
+        for main_key, attr_name in night_keys.items():
             target_dict = getattr(self.gui_setting, attr_name)
             for sub_key in ["background", "background_hover", "border", "font_color"]:
                 lookup_key = f"{main_key}_{sub_key}"
@@ -1224,83 +1266,124 @@ class SettingsWindow(QMainWindow):
                     target_dict[sub_key] = self.get_input_color("night", main_key, sub_key)
 
         self.gui_setting.save()
-
-        # 3. 检测变化
-        platform_changed = (old_enabled_platform != new_enabled_platform)
-        playlist_changed = (new_enabled_playlist != old_enabled_playlist)
-        mystery_cover_changed = (old_mystery_cover != self.pa_setting.mystery_song_cover)
-
-        # 4. 界面反馈
-        self.pa_setting.load()
-        self.load_playlist_table()
         self.apply_gui_theme()
+        self.notify_settings_changed(gui_changed=True)
+        self._mark_saved()
 
-        if platform_changed or playlist_changed:
-            QMessageBox.information(self, _("playlist_switched"), _("playlist_switched_restart"))
-            self.restart_application()
-        elif mystery_cover_changed:
-            self.notify_settings_changed()
-            QMessageBox.information(self, _("save_success"), _("all_settings_saved"))
-        else:
-            self.notify_settings_changed()
-            QMessageBox.information(self, _("save_success"), _("all_settings_saved"))
+    @staticmethod
+    def _enabled_playlist_key(playlists):
+        for playlist in playlists:
+            if playlist.enabled:
+                return playlist.name, playlist.typename, playlist.playlist_album_id
+        return None
 
+    def _restore_enabled_playlist(self, enabled_key):
+        for row in range(self.table_pl.rowCount()):
+            platform = self.table_pl.cellWidget(row, 0).currentData()
+            playlist_id = self.table_pl.cellWidget(row, 1).text().strip()
+            typename = self.table_pl.cellWidget(row, 2).currentData()
+            chk_widget = self.table_pl.cellWidget(row, 4)
+            checkbox = chk_widget.findChild(QCheckBox, "chk_enabled")
+            checkbox.blockSignals(True)
+            checkbox.setChecked((platform, typename, playlist_id) == enabled_key)
+            checkbox.blockSignals(False)
 
-    def restart_application(self):
-        import os
-        import subprocess
-        import sys
+    def _save_playlist_table(self, *, force_runtime_reload=False):
+        """仅提交非空且已加载的歌单行；活动歌单变化后执行进程内热切换。"""
+        if not self._autosave_ready:
+            return False
 
-        exe_dir = os.path.dirname(sys.executable)
-        exe_path = os.path.join(exe_dir, "DiscoAS.exe")
-        self.close()
-        if os.path.exists(exe_path):
-            subprocess.Popen([exe_path])
-        else:
-            # fallback：开发环境用 python main.py
-            script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "main.py")
-            subprocess.Popen([sys.executable, script_path])
-        QApplication.instance().quit()
+        old_enabled_key = self._enabled_playlist_key(self.pa_setting.playlist_albums)
+        new_playlists = []
+        new_enabled_key = None
 
+        for row in range(self.table_pl.rowCount()):
+            platform = self.table_pl.cellWidget(row, 0).currentData()
+            playlist_id = self.table_pl.cellWidget(row, 1).text().strip()
+            typename = self.table_pl.cellWidget(row, 2).currentData()
+            name_label = self.table_pl.cellWidget(row, 3)
+            playlist_name = name_label.text() if name_label else ""
+            chk_widget = self.table_pl.cellWidget(row, 4)
+            checkbox = chk_widget.findChild(QCheckBox, "chk_enabled")
+            enabled = checkbox.isChecked() if checkbox else False
 
-    def notify_settings_changed(self):
+            if not playlist_id:
+                if enabled:
+                    self._restore_enabled_playlist(old_enabled_key)
+                    QMessageBox.warning(self, _("load_failed"), _("enter_id_first"))
+                    return False
+                continue
+
+            if enabled:
+                try:
+                    from load_playlist_json import Playlist
+
+                    Playlist.clear_cache()
+                    Playlist(platform, typename, playlist_id)
+                except Exception:
+                    self._restore_enabled_playlist(old_enabled_key)
+                    QMessageBox.warning(self, _("load_failed"), _("load_before_enable"))
+                    return False
+                new_enabled_key = (platform, typename, playlist_id)
+
+            playlist_data = {
+                "name": platform,
+                "playlist_album_id": playlist_id,
+                "typename": typename,
+                "playlist_album_name": playlist_name,
+                "playlist_album_remark": "",
+                "update_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "enabled": enabled,
+            }
+            new_playlists.append(PlaylistAlbum(playlist_data))
+
+        self.pa_setting.playlist_albums = new_playlists
+        self.pa_setting.save()
+        playlist_changed = old_enabled_key != new_enabled_key
+        if playlist_changed or force_runtime_reload:
+            self.notify_settings_changed(music_changed=True)
+        self._mark_saved()
+        return True
+
+    def _schedule_playlist_save(self):
+        if not self._autosave_ready or self._playlist_save_scheduled:
+            return
+        self._playlist_save_scheduled = True
+
+        def commit():
+            self._playlist_save_scheduled = False
+            self._save_playlist_table()
+
+        QTimer.singleShot(0, commit)
+
+    def notify_settings_changed(self, *, music_changed=False, gui_changed=False, shortcut_changed=False):
         try:
-            from settings.gui_setting import reload_global_gui_setting
-            reload_global_gui_setting()
-            print("已通知 GUI 设置已更新")
-        except Exception as e:
-            print(f"通知设置更新失败: {e}")
-
-        try:
-            import os
-            import sys
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
             import Discover_gui
 
-            if Discover_gui._main_window is not None and Discover_gui._main_window.isVisible():
-                if Discover_gui._global_discover_app:
-                    Discover_gui._global_discover_app.gui_setting.load()
-                print("Discover 浮窗已刷新")
+            if gui_changed:
+                from settings.gui_setting import reload_global_gui_setting
 
-            if Discover_gui._global_app and Discover_gui._global_discover_app:
+                reload_global_gui_setting()
+
+            if shortcut_changed and Discover_gui._global_app and Discover_gui._global_discover_app:
                 Discover_gui.reregister_shortcut(Discover_gui._global_app, Discover_gui._global_discover_app)
                 print("快捷键已重新注册")
 
-            if Discover_gui._global_discover_app:
-                Discover_gui._global_discover_app.music_setting.load()
-                Discover_gui._global_discover_app._apply_settings()
-                Discover_gui._global_discover_app._update_enabled_playlist()
-                print("已更新歌单设置")
-
-            Discover_gui._image_cache.clear()
-            Discover_gui._cached_song_batches.clear()
-            print("已清空图片缓存和歌曲缓存")
-
-            if Discover_gui._global_discover_app:
-                Discover_gui.preload_next_batch(Discover_gui._global_discover_app)
-                print("已触发重新预加载")
+            if Discover_gui._global_discover_app and (music_changed or gui_changed):
+                Discover_gui.apply_runtime_settings(
+                    Discover_gui._global_discover_app,
+                    reload_songs=music_changed,
+                    reload_visual=gui_changed,
+                )
         except Exception as e:
             print(f"刷新浮窗失败: {e}")
+
+    def closeEvent(self, event):
+        """关闭前提交仍处于防抖等待中的最后一次界面修改。"""
+        if hasattr(self, "_gui_save_timer") and self._gui_save_timer.isActive():
+            self._gui_save_timer.stop()
+            self._save_gui_preferences()
+        super().closeEvent(event)
 
 
     def apply_gui_theme(self):
