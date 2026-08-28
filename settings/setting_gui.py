@@ -366,7 +366,7 @@ class SettingsWindow(QMainWindow):
         layout.addSpacing(30)
 
         # 版本信息（可点击超链接）
-        version_title = QLabel(f'<a href="https://github.com/Narcissu-s1/DiscoAS">{_("version")}: v1.1.0</a>')
+        version_title = QLabel(f'<a href="https://github.com/Narcissu-s1/DiscoAS">{_("version")}: v1.1.1</a>')
         version_title.setFont(QFont("", weight=QFont.Weight.Bold))
         version_title.setOpenExternalLinks(True)
         layout.addWidget(version_title)
