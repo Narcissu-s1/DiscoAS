@@ -50,6 +50,123 @@ def test_invalid_type_is_rejected_before_network(module_name, network_target):
     network.assert_not_called()
 
 
+def test_netease_share_links_are_normalized_without_network():
+    from platforms.NeteaseCloudMusic.get_json import PlaylistAlbumJson
+
+    with patch("platforms.NeteaseCloudMusic.get_json.get_session") as get_session:
+        playlist = PlaylistAlbumJson(
+            "https://music.163.com/playlist?id=9607663224&"
+            "uct2=U2FsdGVkX18Vj0wkJb9GZLBgolxUVH+Qld9HoTB+854=",
+            "playlist",
+        )
+        album = PlaylistAlbumJson(
+            "https://music.163.com/#/album?id=123456", "album"
+        )
+
+    get_session.assert_not_called()
+    assert playlist.get_id() == "9607663224"
+    assert album.get_id() == "123456"
+
+
+def test_netease_share_link_type_must_match_selection():
+    from platforms.NeteaseCloudMusic.get_json import PlaylistAlbumJson
+
+    with pytest.raises(ValueError, match="不是专辑链接"):
+        PlaylistAlbumJson(
+            "https://music.163.com/playlist?id=9607663224", "album"
+        )
+
+
+def test_qq_direct_links_are_normalized_without_network():
+    from platforms.QQMusic.get_json import PlaylistAlbumJson
+
+    with patch("platforms.QQMusic.get_json.requests.get") as get:
+        playlist = PlaylistAlbumJson(
+            "https://y.qq.com/n/ryqq_v2/playlist/832367039?ADTAG=h5_share_playlist",
+            "playlist",
+        )
+        album = PlaylistAlbumJson(
+            "https://y.qq.com/n/ryqq_v2/albumDetail/004RT1Bi1Ee6r5",
+            "album",
+        )
+        legacy_album = PlaylistAlbumJson(
+            "https://y.qq.com/n/yqq/album/002mZevo3M5ugZ.html", "album"
+        )
+        query_album = PlaylistAlbumJson(
+            "https://i.y.qq.com/n2/m/share/details/album.html?"
+            "albumMid=004RT1Bi1Ee6r5",
+            "album",
+        )
+
+    get.assert_not_called()
+    assert playlist.get_id() == "832367039"
+    assert album.get_id() == "004RT1Bi1Ee6r5"
+    assert legacy_album.get_id() == "002mZevo3M5ugZ"
+    assert query_album.get_id() == "004RT1Bi1Ee6r5"
+
+
+def test_qq_short_share_is_resolved_only_on_refresh():
+    from platforms.QQMusic.get_json import PlaylistAlbumJson
+
+    short_url = "https://c6.y.qq.com/base/fcgi-bin/u?__=GPVewtsu9Krd"
+    final_url = (
+        "https://y.qq.com/n/ryqq_v2/playlist/832367039?"
+        "ADTAG=h5_share_playlist&redirecttag=mn.redirect.custom"
+    )
+    redirect_response = MagicMock()
+    redirect_response.status_code = 302
+    redirect_response.url = short_url
+    redirect_response.headers = {"Location": final_url}
+    api_response = MagicMock()
+    api_response.json.return_value = {
+        "cdlist": [{"dissname": "QQ 分享歌单", "songlist": [{"songid": 123}]}]
+    }
+
+    with patch(
+        "platforms.QQMusic.get_json.requests.get",
+        side_effect=[redirect_response, api_response],
+    ) as get:
+        provider = PlaylistAlbumJson(short_url, "playlist")
+        get.assert_not_called()
+        provider.refresh()
+
+    assert provider.get_id() == "832367039"
+    assert provider.get_name() == "QQ 分享歌单"
+    assert provider.get_songs() == [123]
+    assert get.call_count == 2
+    assert get.call_args_list[0].args[0] == short_url
+    assert get.call_args_list[0].kwargs["allow_redirects"] is False
+    assert get.call_args_list[1].kwargs["params"]["disstid"] == 832367039
+
+
+def test_qq_short_share_rejects_external_redirect():
+    from platforms.QQMusic.get_json import PlaylistAlbumJson
+
+    response = MagicMock()
+    response.status_code = 302
+    response.url = "https://c6.y.qq.com/base/fcgi-bin/u?__=unsafe"
+    response.headers = {"Location": "https://example.com/playlist/832367039"}
+
+    with (
+        patch("platforms.QQMusic.get_json.requests.get", return_value=response),
+        patch.object(PlaylistAlbumJson, "_load_from_cache", return_value=False),
+        pytest.raises(ValueError, match="y.qq.com"),
+    ):
+        PlaylistAlbumJson(response.url, "playlist").refresh()
+
+
+def test_kugou_user_share_link_is_normalized_without_network():
+    from platforms.KugouMusic.get_json import PlaylistAlbumJson
+
+    with patch("platforms.KugouMusic.get_json.get_session") as get_session:
+        provider = PlaylistAlbumJson(
+            "https://t1.kugou.com/2QF4P68G4V3", "playlist"
+        )
+
+    get_session.assert_not_called()
+    assert provider.get_id() == "2QF4P68G4V3"
+
+
 def test_http_error_without_cache_is_raised(tmp_path):
     from platforms.NeteaseCloudMusic.get_json import PlaylistAlbumJson
 

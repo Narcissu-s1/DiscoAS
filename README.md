@@ -62,19 +62,19 @@
 
 - 右键系统托盘图标进入「设置」
 - 进入「发现设置」，选择「添加歌单」
-- 选择对应平台，输入 ID，选择类型（歌单或专辑）
+- 选择对应平台，粘贴分享链接（或输入原有 ID），选择类型（歌单或专辑）
 - 点击「加载」验证、获取真实名称并写入本地缓存，然后启用该项
 - 设置会自动保存并立即生效，无需点击保存或重启应用；保存后左下角只显示“修改已保存”
 - 同一时间只能启用一个歌单或专辑；歌单必须先“加载”成功，才能启用
 
 ### 各平台需要填写什么
 
-输入框通常只填写链接中的 ID；只有酷狗歌单支持直接粘贴完整分享链接。
+输入框可以直接粘贴分享链接，也兼容原有 ID。加载成功后，程序会自动把输入内容规范化为内部使用的 ID 或短码。
 
 | 平台 | 歌单 | 专辑 |
 | --- | --- | --- |
-| 网易云音乐 | `https://music.163.com/playlist?id=123` 中的 `123` | `https://music.163.com/album?id=456` 中的 `456` |
-| QQ 音乐 | `https://y.qq.com/n/ryqq_v2/playlist/123` 中的 `disstid`：`123` | 专辑链接中的数字 `albumid` 或字符串 `albummid` |
+| 网易云音乐 | 完整的 `https://music.163.com/playlist?id=123` 分享链接，或 `123` | 完整的 `https://music.163.com/album?id=456` 分享链接，或 `456` |
+| QQ 音乐 | 完整的 `https://c6.y.qq.com/...` 短链、`https://y.qq.com/.../playlist/123` 链接，或 `123` | 完整的 QQ 音乐专辑链接、数字 `albumid` 或字符串 `albummid` |
 | 酷狗音乐 | 完整的 `https://t1.kugou.com/短码`、其中的短码，或旧版数字 `specialid`；兼容新版 `share_type=collect` 收藏集合 | 数字 `album_id` 或专辑分享短码 |
 | Spotify | `https://open.spotify.com/playlist/ID` 中的 `ID` | `https://open.spotify.com/album/ID` 中的 `ID` |
 

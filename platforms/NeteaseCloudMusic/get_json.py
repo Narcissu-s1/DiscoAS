@@ -6,6 +6,7 @@
 
 import os
 import sys
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -21,6 +22,35 @@ NETEASE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.
 
 # 创建全局Session用于连接复用
 _session: requests.Session | None = None
+
+
+def _normalize_collection_input(value: str, typename: str) -> str:
+    """从网易云歌单/专辑链接中提取内部使用的数字 ID。"""
+    normalized = value.strip()
+    if not normalized.lower().startswith(("http://", "https://")):
+        return normalized
+
+    parsed = urlparse(normalized)
+    hostname = (parsed.hostname or "").lower()
+    if hostname != "music.163.com" and not hostname.endswith(".music.163.com"):
+        raise ValueError("仅支持 music.163.com 的歌单/专辑链接")
+
+    path = parsed.path
+    query = parsed.query
+    if parsed.fragment.startswith("/"):
+        fragment = urlparse(parsed.fragment)
+        path = fragment.path
+        query = fragment.query or query
+
+    expected_path = f"/{typename}"
+    if not path.rstrip("/").endswith(expected_path):
+        type_name = "歌单" if typename == "playlist" else "专辑"
+        raise ValueError(f"该网易云链接不是{type_name}链接")
+
+    collection_id = parse_qs(query, keep_blank_values=True).get("id", [""])[0].strip()
+    if not collection_id.isdigit():
+        raise ValueError("网易云链接中没有有效的数字 ID")
+    return collection_id
 
 
 def get_session() -> requests.Session:
@@ -42,7 +72,10 @@ class PlaylistAlbumJson(CollectionProvider):
     platform_name = "NeteaseCloudMusic"
 
     def __init__(self, playlist_album_id: str, typename: str):
-        super().__init__(playlist_album_id, typename)
+        super().__init__(playlist_album_id.strip(), typename)
+        self.playlist_album_id = _normalize_collection_input(
+            self.playlist_album_id, self.typename
+        )
         self.playlist_album_name: str = ""
         self.playlist_album_json: dict | list = {}
 

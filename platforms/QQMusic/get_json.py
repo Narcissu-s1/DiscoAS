@@ -6,7 +6,9 @@ QQ音乐 API 模块 - 使用签名算法
 """
 
 import os
+import re
 import sys
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 
@@ -16,6 +18,98 @@ from platforms.provider_common import CollectionProvider, response_json
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings'))
 from settings.user_data_path import ensure_dir, get_album_dir, get_playlist_dir
 
+QQ_SHARE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+QQ_MAX_SHARE_REDIRECTS = 5
+QQ_SHARE_HOST_PATTERN = re.compile(
+    r"^(?:[a-z0-9-]+\.)*y\.qq\.com$", re.IGNORECASE
+)
+
+
+def _parse_collection_url(value: str, typename: str) -> str | None:
+    """解析 QQ 音乐官方 URL；短链在显式刷新阶段另行展开。"""
+    parsed = urlparse(value)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise ValueError("QQ 音乐分享链接必须使用 http 或 https")
+    if not parsed.hostname or not QQ_SHARE_HOST_PATTERN.fullmatch(parsed.hostname):
+        raise ValueError("仅支持 y.qq.com 的歌单/专辑链接")
+
+    path = parsed.path
+    lowered_path = path.lower()
+    query = {
+        key.lower(): values
+        for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+    }
+
+    if typename == "playlist":
+        if "album" in lowered_path:
+            raise ValueError("该 QQ 音乐链接不是歌单链接")
+        path_match = re.search(
+            r"/playlist/(\d+)(?:\.html)?(?:/|$)", path, re.IGNORECASE
+        )
+        if path_match:
+            return path_match.group(1)
+        if "playlist" in lowered_path or "taoge" in lowered_path:
+            collection_id = (
+                query.get("disstid", [""])[0] or query.get("id", [""])[0]
+            ).strip()
+            if collection_id.isdigit():
+                return collection_id
+    else:
+        if "playlist" in lowered_path or "taoge" in lowered_path:
+            raise ValueError("该 QQ 音乐链接不是专辑链接")
+        path_match = re.search(
+            r"/(?:albumdetail|album)/([A-Za-z0-9]+?)(?:\.html)?(?:/|$)",
+            path,
+            re.IGNORECASE,
+        )
+        if path_match:
+            return path_match.group(1)
+        if "album" in lowered_path:
+            collection_id = (
+                query.get("albummid", [""])[0]
+                or query.get("albumid", [""])[0]
+                or query.get("id", [""])[0]
+            ).strip()
+            if re.fullmatch(r"[A-Za-z0-9]+", collection_id):
+                return collection_id
+    return None
+
+
+def _resolve_share_url(share_url: str, typename: str) -> str:
+    """逐跳展开 QQ 音乐短链，并拒绝跳转到非官方域名。"""
+    current_url = share_url
+    headers = {"User-Agent": QQ_SHARE_USER_AGENT}
+    for _ in range(QQ_MAX_SHARE_REDIRECTS + 1):
+        parsed = urlparse(current_url)
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or not QQ_SHARE_HOST_PATTERN.fullmatch(parsed.hostname)
+        ):
+            raise ValueError("QQ 音乐分享链接重定向到了外部域名")
+
+        response = requests.get(
+            current_url,
+            headers=headers,
+            allow_redirects=False,
+            timeout=10,
+        )
+        if response.status_code not in {301, 302, 303, 307, 308}:
+            response.raise_for_status()
+            final_url = response.url if isinstance(response.url, str) else current_url
+            if _parse_collection_url(final_url, typename):
+                return final_url
+            raise ValueError("QQ 音乐分享页没有返回可识别的歌单/专辑链接")
+
+        location = response.headers.get("Location")
+        if not location:
+            raise ValueError("QQ 音乐分享链接重定向缺少 Location")
+        base_url = response.url if isinstance(response.url, str) else current_url
+        current_url = urljoin(base_url, location)
+        if _parse_collection_url(current_url, typename):
+            return current_url
+    raise ValueError("QQ 音乐分享链接重定向次数超过安全上限")
+
 
 class PlaylistAlbumJson(CollectionProvider):
     """QQ音乐歌单/专辑JSON获取类"""
@@ -23,7 +117,16 @@ class PlaylistAlbumJson(CollectionProvider):
     platform_name = "QQMusic"
 
     def __init__(self, playlist_album_id: str, typename: str):
-        super().__init__(playlist_album_id, typename)
+        super().__init__(playlist_album_id.strip(), typename)
+        self._share_url = ""
+        if self.playlist_album_id.lower().startswith(("http://", "https://")):
+            normalized_id = _parse_collection_url(
+                self.playlist_album_id, self.typename
+            )
+            if normalized_id:
+                self.playlist_album_id = normalized_id
+            else:
+                self._share_url = self.playlist_album_id
         self.playlist_album_name: str = ""
         self.playlist_album_json: dict | list = {}
         self.cover_url: str = ""
@@ -31,6 +134,14 @@ class PlaylistAlbumJson(CollectionProvider):
 
     def _fetch_data(self) -> None:
         """获取歌单/专辑数据"""
+        if self._share_url:
+            resolved_url = _resolve_share_url(self._share_url, self.typename)
+            normalized_id = _parse_collection_url(resolved_url, self.typename)
+            if not normalized_id:
+                raise ValueError("无法从 QQ 音乐分享链接中解析歌单/专辑 ID")
+            self.playlist_album_id = normalized_id
+            self._share_url = ""
+
         self.playlist_album_name = ""
         self.playlist_album_json = {}
         self.cover_url = ""

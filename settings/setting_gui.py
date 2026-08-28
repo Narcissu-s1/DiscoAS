@@ -516,7 +516,7 @@ class SettingsWindow(QMainWindow):
         self.table_pl.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table_pl.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self.table_pl.setColumnWidth(0, 150)   # 平台
-        self.table_pl.setColumnWidth(1, 120)   # ID
+        self.table_pl.setColumnWidth(1, 220)   # 分享链接或 ID
         self.table_pl.setColumnWidth(2, 100)   # 类型
         self.table_pl.setColumnWidth(4, 80)   # 启用
         self.table_pl.setColumnWidth(5, 150) # 操作
@@ -981,8 +981,9 @@ class SettingsWindow(QMainWindow):
                 cmb_platform.setCurrentIndex(index)
         self.table_pl.setCellWidget(row, 0, cmb_platform)
 
-        # 2. ID
+        # 2. 分享链接或 ID
         edit_id = QLineEdit()
+        edit_id.setPlaceholderText(_("collection_link_or_id_placeholder"))
         if data:
             edit_id.setText(str(data.playlist_album_id))
         self.table_pl.setCellWidget(row, 1, edit_id)
@@ -1052,7 +1053,7 @@ class SettingsWindow(QMainWindow):
     def load_playlist_data(self, row):
         """加载歌单/专辑数据"""
         platform = self.table_pl.cellWidget(row, 0).currentData()
-        playlist_id = self.table_pl.cellWidget(row, 1).text()
+        playlist_id = self.table_pl.cellWidget(row, 1).text().strip()
         typename = self.table_pl.cellWidget(row, 2).currentData()
 
         if not playlist_id:
