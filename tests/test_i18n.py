@@ -34,7 +34,7 @@ def test_set_language():
     from settings.i18n import set_language, t
 
     set_language("en_US")
-    assert t("discover") == "Discover a Song!"
+    assert t("discover") == "Choose a Song"
 
 
 def test_t_returns_key_when_missing():

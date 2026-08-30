@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -25,8 +26,8 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
-    QStackedWidget,
     QTableWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -158,6 +159,13 @@ class FloatSlider(QWidget):
         self.slider.setValue(int(value * 100))
 
 
+class NoWheelComboBox(QComboBox):
+    """忽略滚轮事件，避免鼠标悬停时误改选项。"""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 class SettingsWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -179,91 +187,86 @@ class SettingsWindow(QMainWindow):
             pass
 
         # 2. 初始化界面
-        self.setWindowTitle(_("app_name") + " - Settings")
+        self.setWindowTitle(f"{_('app_name')} - {_('settings_window')}")
 
         # 设置窗口图标 - 使用 get_app_root() 支持打包后环境
         icon_path = os.path.join(_get_src_path(), "Icon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        self.resize(1450, 750)
+        self.resize(1180, 760)
+        self.setMinimumSize(900, 620)
 
-        # 中央部件 - 使用水平布局
+        # 中央部件
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(24, 18, 24, 18)
+        main_layout.setSpacing(14)
 
-        # ========== 左侧导航栏 ==========
-        left_widget = QWidget()
-        left_widget.setFixedWidth(200)
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(15, 20, 15, 20)
-        left_layout.setSpacing(10)
+        # ========== 页头 ==========
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(14)
 
-        # Logo
         logo_label = QLabel()
         logo_pixmap = QPixmap(os.path.join(_get_src_path(), "DiscoAS.png"))
-        scaled_pixmap = logo_pixmap.scaled(120, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        scaled_pixmap = logo_pixmap.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         logo_label.setPixmap(scaled_pixmap)
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        left_layout.addWidget(logo_label)
-        left_layout.addSpacing(10)
+        header_layout.addWidget(logo_label)
 
-        # 导航按钮
-        nav_buttons = [
-            (_("about"), 0),
-            (_("discover_settings"), 1),
-            (_("gui_settings"), 2),
-            (_("other_settings"), 3),
-        ]
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(2)
+        title = QLabel(_("settings_window"))
+        title.setObjectName("SettingsTitle")
+        subtitle = QLabel(_("settings_subtitle"))
+        subtitle.setObjectName("SettingsSubtitle")
+        title_layout.addWidget(title)
+        title_layout.addWidget(subtitle)
+        header_layout.addLayout(title_layout)
+        header_layout.addStretch()
 
-        self.btn_group = QButtonGroup(self)
-        self.nav_buttons = {}
+        header_tools = QWidget()
+        header_tools_layout = QHBoxLayout(header_tools)
+        header_tools_layout.setContentsMargins(0, 0, 0, 0)
+        header_tools_layout.setSpacing(10)
+        self.chk_auto_start = QCheckBox(_("auto_start"))
+        self.chk_auto_start.setChecked(self._get_auto_start_status())
+        self.btn_view_log = QPushButton(_("view_log"))
+        self.btn_view_log.clicked.connect(self._open_log_folder)
+        header_tools_layout.addWidget(self.chk_auto_start)
+        header_tools_layout.addWidget(self.btn_view_log)
+        header_layout.addWidget(header_tools)
+        main_layout.addWidget(header)
 
-        for text, idx in nav_buttons:
-            btn = QPushButton(text)
-            btn.setCheckable(True)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.btn_group.addButton(btn, idx)
-            self.nav_buttons[idx] = btn
-            left_layout.addWidget(btn)
-
-        self.btn_group.buttonClicked.connect(self.switch_page)
-
-        left_layout.addStretch()
-
-        # 设置自动保存，仅保留关闭按钮。
-        self.lbl_save_status = QLabel("")
-        self.lbl_save_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.btn_close = QPushButton(_("close"))
-        self.btn_close.setMinimumHeight(40)
-        self.btn_close.clicked.connect(self.close)
-
-        left_layout.addWidget(self.lbl_save_status)
-        left_layout.addWidget(self.btn_close)
-
-        main_layout.addWidget(left_widget)
-
-        # 分割线
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.VLine)
-        main_layout.addWidget(line)
-
-        # ========== 右侧内容区 ==========
-        self.stack = QStackedWidget()
+        # ========== 同一个 Tab 栏内的设置页 ==========
+        self.stack = QTabWidget()
+        self.stack.setDocumentMode(True)
         main_layout.addWidget(self.stack, 1)
 
-        # 创建四个页面
-        self.init_about_page()
+        # 优先展示最常用的选歌流程。
         self.init_music_page()
         self.init_gui_page()
-        self.init_other_settings_page()
+        self.init_about_page()
 
-        # 默认显示关于页面
-        self.btn_group.button(0).setChecked(True)
         self.stack.setCurrentIndex(0)
+
+        # 设置自动保存，底部仅保留状态和关闭按钮。
+        footer = QFrame()
+        footer.setObjectName("SettingsFooter")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        self.lbl_save_status = QLabel("")
+        self.lbl_save_status.setObjectName("SaveStatus")
+        self.btn_close = QPushButton(_("close"))
+        self.btn_close.setMinimumWidth(110)
+        self.btn_close.clicked.connect(self.close)
+        footer_layout.addWidget(self.lbl_save_status)
+        footer_layout.addStretch()
+        footer_layout.addWidget(self.btn_close)
+        main_layout.addWidget(footer)
 
         # 初始渲染
         self.apply_gui_theme()
@@ -274,12 +277,6 @@ class SettingsWindow(QMainWindow):
         self._gui_save_timer.timeout.connect(self._save_gui_preferences)
         self._connect_auto_save_signals()
         self._autosave_ready = True
-
-
-    def switch_page(self, button):
-        """切换页面"""
-        page_id = self.btn_group.id(button)
-        self.stack.setCurrentIndex(page_id)
 
 
     def _connect_auto_save_signals(self):
@@ -366,7 +363,7 @@ class SettingsWindow(QMainWindow):
         layout.addSpacing(30)
 
         # 版本信息（可点击超链接）
-        version_title = QLabel(f'<a href="https://github.com/Narcissu-s1/DiscoAS">{_("version")}: v1.1.1</a>')
+        version_title = QLabel(f'<a href="https://github.com/Narcissu-s1/DiscoAS">{_("version")}: v1.1.2</a>')
         version_title.setFont(QFont("", weight=QFont.Weight.Bold))
         version_title.setOpenExternalLinks(True)
         layout.addWidget(version_title)
@@ -403,14 +400,14 @@ class SettingsWindow(QMainWindow):
 
         layout.addStretch()
 
-        self.stack.addWidget(page)
+        self.stack.addTab(page, _("about"))
 
 
     def init_music_page(self):
-        """发现设置页面"""
+        """歌曲来源与选歌设置页面。"""
         self.music_page = QWidget()
         layout = QVBoxLayout(self.music_page)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(18, 18, 18, 18)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -419,30 +416,31 @@ class SettingsWindow(QMainWindow):
         scroll.setWidget(content_widget)
 
         v_layout = QVBoxLayout(content_widget)
-        v_layout.setSpacing(15)
+        v_layout.setSpacing(14)
 
-        # --- 参数区 ---
-        group_basic = QGroupBox(_("basic_params"))
-        form_basic = QFormLayout(group_basic)
-        form_basic.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
+        page_title = QLabel(_("selection_title"))
+        page_title.setObjectName("PageTitle")
+        page_description = QLabel(_("selection_description"))
+        page_description.setObjectName("PageDescription")
+        page_description.setWordWrap(True)
+        v_layout.addWidget(page_title)
+        v_layout.addWidget(page_description)
+
+        # --- 选歌规则 ---
+        group_basic = QGroupBox(_("selection_rules"))
+        grid_basic = QGridLayout(group_basic)
+        grid_basic.setHorizontalSpacing(14)
+        grid_basic.setVerticalSpacing(10)
+        grid_basic.setColumnStretch(1, 1)
+        grid_basic.setColumnStretch(3, 2)
 
         self.spin_discovered = QSpinBox()
         self.spin_discovered.setRange(1, 999)
         self.spin_discovered.setValue(self.pa_setting.number_of_discovered_songs)
         self.spin_discovered.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
         self.spin_discovered.setMinimumWidth(120)
-        form_basic.addRow(_("discovered_songs_count"), self.spin_discovered)
-
-        self.chk_mystery = QCheckBox(_("mystery_mode"))
-        self.chk_mystery.setChecked(self.pa_setting.have_mystery_song)
-        form_basic.addRow(self.chk_mystery)
-
-        self.spin_mystery_num = QSpinBox()
-        self.spin_mystery_num.setRange(0, 50)
-        self.spin_mystery_num.setValue(self.pa_setting.num_of_mystery_song)
-        self.spin_mystery_num.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        self.spin_mystery_num.setMinimumWidth(120)
-        form_basic.addRow(_("mystery_songs_count"), self.spin_mystery_num)
+        grid_basic.addWidget(QLabel(_("selection_count")), 0, 0)
+        grid_basic.addWidget(self.spin_discovered, 0, 1)
 
         # 缓存批数设置
         self.spin_cache_batches = QSpinBox()
@@ -450,11 +448,24 @@ class SettingsWindow(QMainWindow):
         self.spin_cache_batches.setValue(self.pa_setting.cache_batches)
         self.spin_cache_batches.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
         self.spin_cache_batches.setMinimumWidth(120)
-        form_basic.addRow(_("cache_batches"), self.spin_cache_batches)
+        grid_basic.addWidget(QLabel(_("cache_batches")), 0, 2)
+        grid_basic.addWidget(self.spin_cache_batches, 0, 3)
+
+        self.chk_mystery = QCheckBox(_("mystery_mode"))
+        self.chk_mystery.setChecked(self.pa_setting.have_mystery_song)
+        grid_basic.addWidget(self.chk_mystery, 1, 0, 1, 2)
+
+        self.spin_mystery_num = QSpinBox()
+        self.spin_mystery_num.setRange(0, 50)
+        self.spin_mystery_num.setValue(self.pa_setting.num_of_mystery_song)
+        self.spin_mystery_num.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.spin_mystery_num.setMinimumWidth(120)
+        grid_basic.addWidget(QLabel(_("mystery_songs_count")), 1, 2)
+        grid_basic.addWidget(self.spin_mystery_num, 1, 3)
 
         self.chk_refresh = QCheckBox(_("refresh_after_cancel"))
         self.chk_refresh.setChecked(self.pa_setting.refreshing_after_cancel)
-        form_basic.addRow(self.chk_refresh)
+        grid_basic.addWidget(self.chk_refresh, 2, 0, 1, 2)
 
         # 快捷键设置
         shortcut_container = QWidget()
@@ -473,9 +484,13 @@ class SettingsWindow(QMainWindow):
         self.btn_set_shortcut.clicked.connect(self.start_shortcut_recording)
         shortcut_layout.addWidget(self.btn_set_shortcut)
 
-        form_basic.addRow(_("global_shortcut"), shortcut_container)
-
-        v_layout.addWidget(group_basic)
+        shortcut_field = QWidget()
+        shortcut_field_layout = QHBoxLayout(shortcut_field)
+        shortcut_field_layout.setContentsMargins(0, 0, 0, 0)
+        shortcut_field_layout.setSpacing(8)
+        shortcut_field_layout.addWidget(QLabel(_("global_shortcut")))
+        shortcut_field_layout.addWidget(shortcut_container, 1)
+        grid_basic.addWidget(shortcut_field, 2, 2, 1, 2)
 
         # --- 秘密歌曲封面设置 ---
         group_mystery_cover = QGroupBox(_("mystery_cover"))
@@ -501,11 +516,30 @@ class SettingsWindow(QMainWindow):
 
         form_cover.addRow(_("cover_source"), cover_input_row)
 
-        v_layout.addWidget(group_mystery_cover)
+        settings_row = QHBoxLayout()
+        settings_row.setSpacing(14)
+        settings_row.addWidget(group_basic, 3)
+        settings_row.addWidget(group_mystery_cover, 2)
+        v_layout.addLayout(settings_row)
 
         # --- 列表区 ---
-        group_list = QGroupBox(_("playlist_management"))
+        group_list = QGroupBox(_("music_sources"))
         v_list = QVBoxLayout(group_list)
+
+        source_header = QHBoxLayout()
+        source_header.setSpacing(14)
+        self.source_hint = QLabel(_("music_sources_hint"))
+        self.source_hint.setObjectName("SectionHint")
+        self.source_hint.setWordWrap(True)
+        self.btn_add_playlist = QPushButton(_("add_playlist"))
+        self.btn_add_playlist.clicked.connect(self.add_playlist_row)
+        source_header.addWidget(self.source_hint, 1)
+        source_header.addWidget(
+            self.btn_add_playlist,
+            0,
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
+        )
+        v_list.addLayout(source_header)
 
         self.table_pl = QTableWidget()
         self.table_pl.setColumnCount(6)
@@ -522,14 +556,8 @@ class SettingsWindow(QMainWindow):
         self.table_pl.setColumnWidth(5, 150) # 操作
         self.table_pl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table_pl.verticalHeader().setDefaultSectionSize(50)
+        self.table_pl.setMinimumHeight(250)
         v_list.addWidget(self.table_pl)
-
-        h_btn = QHBoxLayout()
-        btn_add = QPushButton(_("add_playlist"))
-        btn_add.clicked.connect(self.add_playlist_row)
-        h_btn.addWidget(btn_add)
-        h_btn.addStretch()
-        v_list.addLayout(h_btn)
 
         v_layout.addWidget(group_list)
 
@@ -538,7 +566,7 @@ class SettingsWindow(QMainWindow):
         # 加载数据
         self.load_playlist_table()
 
-        self.stack.addWidget(self.music_page)
+        self.stack.addTab(self.music_page, _("selection_tab"))
 
 
     def init_gui_page(self):
@@ -684,40 +712,7 @@ class SettingsWindow(QMainWindow):
 
         layout.addWidget(scroll)
 
-        self.stack.addWidget(self.gui_page)
-
-
-    def init_other_settings_page(self):
-        """其他设置页面"""
-        self.other_page = QWidget()
-        layout = QVBoxLayout(self.other_page)
-        layout.setContentsMargins(20, 20, 20, 20)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        content_widget = QWidget()
-        scroll.setWidget(content_widget)
-
-        main_layout = QVBoxLayout(content_widget)
-        main_layout.setSpacing(15)
-
-        # --- 开机自启动 ---
-        self.chk_auto_start = QCheckBox(_("auto_start"))
-        # 读取当前开机自启动状态
-        self.chk_auto_start.setChecked(self._get_auto_start_status())
-        main_layout.addWidget(self.chk_auto_start)
-
-        # --- 查看日志 ---
-        btn_view_log = QPushButton(_("view_log"))
-        btn_view_log.clicked.connect(self._open_log_folder)
-        main_layout.addWidget(btn_view_log)
-
-        main_layout.addStretch()
-
-        layout.addWidget(scroll)
-
-        self.stack.addWidget(self.other_page)
+        self.stack.addTab(self.gui_page, _("appearance_tab"))
 
 
     def _get_auto_start_status(self):
@@ -964,7 +959,7 @@ class SettingsWindow(QMainWindow):
             combo_style = self._combo_style_template.replace('#PLACEHOLDER_BG#', '#d0ebf0').replace('#PLACEHOLDER_BORDER#', '#76e8fd')
 
         # 1. Platform
-        cmb_platform = QComboBox()
+        cmb_platform = NoWheelComboBox()
         cmb_platform.setStyleSheet(combo_style)
         platforms = [
             ("NeteaseCloudMusic", _("platform_NeteaseCloudMusic")),
@@ -1424,11 +1419,6 @@ class SettingsWindow(QMainWindow):
         scaled_font_size = int(base_font_size * current_setting_scale)
         scaled_font_size = max(8, scaled_font_size)
 
-        # 左侧导航栏背景
-        left_bg = bg
-        if is_night:
-            left_bg = "#2d2d2d"
-
         # 滚动条颜色 - 将十六进制颜色转换为RGBA格式
         def hex_to_rgba(hex_color, alpha='80'):
             """将十六进制颜色转换为RGBA格式"""
@@ -1449,9 +1439,45 @@ class SettingsWindow(QMainWindow):
                 font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
                 font-size: {scaled_font_size}px;
             }}
+            QLabel#SettingsTitle, QLabel#PageTitle {{
+                font-size: {scaled_font_size + 6}px;
+                font-weight: 700;
+            }}
+            QLabel#SettingsSubtitle, QLabel#PageDescription, QLabel#SectionHint {{
+                color: {input_fg};
+            }}
+            QLabel#SaveStatus {{
+                color: {card_border};
+                font-weight: 600;
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {input_bd};
+                border-radius: 10px;
+                background-color: {bg};
+                top: -1px;
+            }}
+            QTabBar::tab {{
+                background-color: transparent;
+                color: {fg};
+                border: none;
+                border-bottom: 3px solid transparent;
+                padding: 10px 24px;
+                margin-right: 4px;
+            }}
+            QTabBar::tab:hover {{
+                background-color: {card_hover};
+                border-radius: 6px 6px 0 0;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {input_bg};
+                border-bottom: 3px solid {card_border};
+                font-weight: 700;
+            }}
             QGroupBox {{
-                margin-top: 10px;
-                padding-top: 10px;
+                border: 1px solid {input_bd};
+                border-radius: 10px;
+                margin-top: 14px;
+                padding: 18px 14px 14px 14px;
                 font-weight: bold;
             }}
             QGroupBox::title {{
@@ -1594,29 +1620,6 @@ class SettingsWindow(QMainWindow):
             }}
         """
         self.setStyleSheet(style)
-
-        # 设置左侧导航栏特殊样式
-        self.centralWidget().layout().itemAt(0).widget().setStyleSheet(f"""
-            QWidget {{
-                background-color: {left_bg};
-            }}
-            QPushButton {{
-                background-color: transparent;
-                border: none;
-                text-align: left;
-                padding: 12px 15px;
-                color: {fg};
-                font-size: {scaled_font_size + 1}px;
-            }}
-            QPushButton:hover {{
-                background-color: {card_hover};
-            }}
-            QPushButton:checked {{
-                background-color: {card_border};
-                color: white;
-                border-radius: 4px;
-            }}
-        """)
 
         # 更新表格下拉框样式（使用card的悬停色和边框色）
         if hasattr(self, '_combo_style_template'):

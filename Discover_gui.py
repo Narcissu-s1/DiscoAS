@@ -1438,9 +1438,6 @@ def reopen_settings_window(old_window):
     _settings_window = SettingsWindow()
     _settings_window.setGeometry(geometry)
     _settings_window.stack.setCurrentIndex(page_index)
-    button = _settings_window.btn_group.button(page_index)
-    if button:
-        button.setChecked(True)
     _settings_window.show()
 
 

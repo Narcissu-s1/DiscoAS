@@ -27,7 +27,7 @@ def test_music_preferences_autosave_and_hot_reload():
 def test_settings_window_has_no_manual_apply_button():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QTabWidget
 
     from settings.setting_gui import SettingsWindow
 
@@ -39,6 +39,15 @@ def test_settings_window_has_no_manual_apply_button():
         window = SettingsWindow()
 
     assert not hasattr(window, "btn_apply")
+    assert isinstance(window.stack, QTabWidget)
+    assert window.stack.currentIndex() == 0
+    assert [window.stack.tabText(i) for i in range(window.stack.count())] == [
+        "选歌",
+        "外观",
+        "关于",
+    ]
+    assert not window.stack.isAncestorOf(window.chk_auto_start)
+    assert not window.stack.isAncestorOf(window.btn_view_log)
     assert window.lbl_save_status.text() == ""
     window._mark_saved()
     assert window.lbl_save_status.text() == "修改已保存"
@@ -69,6 +78,29 @@ def test_settings_window_flushes_pending_slider_save_on_close():
     app.processEvents()
 
 
+def test_header_auto_start_toggle_keeps_autosave_behavior():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+    from PyQt6.QtWidgets import QApplication
+
+    from settings.setting_gui import SettingsWindow
+
+    app = QApplication.instance() or QApplication([])
+    with (
+        patch.object(SettingsWindow, "_get_auto_start_status", return_value=False),
+        patch.object(SettingsWindow, "_get_playlist_name_from_json", return_value="已加载"),
+    ):
+        window = SettingsWindow()
+
+    with patch.object(window, "_set_auto_start", return_value=True) as set_auto_start:
+        window.chk_auto_start.setChecked(True)
+
+    set_auto_start.assert_called_once_with(True)
+    assert window.lbl_save_status.text() == "修改已保存"
+    window.close()
+    app.processEvents()
+
+
 def test_playlist_address_stays_silent_until_load_succeeds():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -92,6 +124,36 @@ def test_playlist_address_stays_silent_until_load_succeeds():
 
     assert window.lbl_save_status.text() == ""
     save_music.assert_not_called()
+    window.close()
+    app.processEvents()
+
+
+def test_platform_combo_ignores_wheel_without_affecting_type_combo():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+    from PyQt6.QtWidgets import QApplication, QComboBox
+
+    from settings.setting_gui import NoWheelComboBox, SettingsWindow
+
+    app = QApplication.instance() or QApplication([])
+    with (
+        patch.object(SettingsWindow, "_get_auto_start_status", return_value=False),
+        patch.object(SettingsWindow, "_get_playlist_name_from_json", return_value="已加载"),
+    ):
+        window = SettingsWindow()
+
+    window.add_playlist_row()
+    row = window.table_pl.rowCount() - 1
+    platform_combo = window.table_pl.cellWidget(row, 0)
+    type_combo = window.table_pl.cellWidget(row, 2)
+    wheel_event = MagicMock()
+    platform_combo.setCurrentIndex(1)
+    platform_combo.wheelEvent(wheel_event)
+
+    assert isinstance(platform_combo, NoWheelComboBox)
+    assert type(type_combo) is QComboBox
+    assert platform_combo.currentIndex() == 1
+    wheel_event.ignore.assert_called_once_with()
     window.close()
     app.processEvents()
 
